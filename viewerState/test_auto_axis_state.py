@@ -2,6 +2,8 @@ import hou
 import viewerstate.utils as su
 import resourceutils as ru
 
+from skyforge.forge_draw import LineFX
+
 
 class State(object):
     HUD_TEMPLATE = {
@@ -56,23 +58,17 @@ class State(object):
 
         self.color_options = ru.ColorOptions(self.scene_viewer)
 
-        # --- guide line drawable ---
+        # --- guide line (LineFX) ---
         self.guide_len = 0.3
-        self.guide_line_geo = None
-        self.guide_line_pts = None
-        self.guide_line_prim = None
-        self.guide_line_drawable = None
+        self.guide_line = None
 
-        # --- edge hover drawable (single highlighted edge) ---
-        self.edge_hover_geo = None
-        self.edge_hover_pts = None
-        self.edge_hover_prim = None
-        self.edge_hover_drawable = None
+        # --- edge hover highlight (LineFX) ---
+        self.edge_hover = None
 
         # --- callback guard ---
         self._cb_registered = False
 
-        # --- stash sync signature (for undo/redo, external recook, etc.) ---
+        # --- stash sync signature ---
         self._stash_sig = None
 
     # -------------------------------------------------------------------------
@@ -117,51 +113,48 @@ class State(object):
             pass
 
     # -------------------------------------------------------------------------
-    # Edge hover highlight (single edge)
+    # Drawables (LineFX)
     # -------------------------------------------------------------------------
 
+    def _init_guide_line(self):
+        color = self.color_options.colorFromName("PickedHandleColor")
+        self.guide_line = LineFX(self.scene_viewer, "auto_axis_guide_line", color, line_width=2.0)
+        self.guide_line.hide()
+
+    def _update_guide_line(self, origin, axis_dir):
+        if self.guide_line is None:
+            return
+        if origin is None or axis_dir is None or axis_dir.length() < 1e-6:
+            self.guide_line.hide()
+            return
+
+        a = axis_dir.normalized()
+        self.guide_line.set_line(origin, origin + a * self.guide_len)
+
+    def _hide_guide_line(self):
+        if self.guide_line is not None:
+            self.guide_line.hide()
+
     def _init_edge_hover(self):
-        self.edge_hover_geo = hou.Geometry()
-        self.edge_hover_pts = [self.edge_hover_geo.createPoint(), self.edge_hover_geo.createPoint()]
-
-        self.edge_hover_prim = self.edge_hover_geo.createPolygon()
-        self.edge_hover_prim.setIsClosed(False)
-        self.edge_hover_prim.addVertex(self.edge_hover_pts[0])
-        self.edge_hover_prim.addVertex(self.edge_hover_pts[1])
-
-        self.edge_hover_drawable = hou.GeometryDrawable(
-            self.scene_viewer, hou.drawableGeometryType.Line, "auto_axis_edge_hover"
-        )
-        self.edge_hover_drawable.setGeometry(self.edge_hover_geo)
-        self.edge_hover_drawable.setParams({
-            "color1": self.color_options.colorFromName("PickedHandleColor"),
-            "line_width": 3.0
-        })
-        self.edge_hover_drawable.show(False)
+        color = self.color_options.colorFromName("PickedHandleColor")
+        self.edge_hover = LineFX(self.scene_viewer, "auto_axis_edge_hover", color, line_width=3.0)
+        self.edge_hover.hide()
 
     def _update_edge_hover_from_points(self, p0, p1):
-        if self.edge_hover_drawable is None or self._edit_geo is None:
+        if self.edge_hover is None or self._edit_geo is None:
             return
 
         pt0 = self._edit_geo.point(p0)
         pt1 = self._edit_geo.point(p1)
         if pt0 is None or pt1 is None:
-            self.edge_hover_drawable.show(False)
+            self.edge_hover.hide()
             return
 
-        self.edge_hover_pts[0].setPosition(pt0.position())
-        self.edge_hover_pts[1].setPosition(pt1.position())
-
-        P = self.edge_hover_geo.findPointAttrib("P")
-        if P is not None:
-            P.incrementDataId()
-        self.edge_hover_geo.incrementModificationCounter()
-
-        self.edge_hover_drawable.show(True)
+        self.edge_hover.set_line(pt0.position(), pt1.position())
 
     def _hide_edge_hover(self):
-        if self.edge_hover_drawable is not None:
-            self.edge_hover_drawable.show(False)
+        if self.edge_hover is not None:
+            self.edge_hover.hide()
 
     # -------------------------------------------------------------------------
     # Selection / affected points
@@ -512,51 +505,6 @@ class State(object):
         except:
             pass
         self._cb_registered = False
-
-    # -------------------------------------------------------------------------
-    # Guide line
-    # -------------------------------------------------------------------------
-
-    def _init_guide_line(self):
-        self.guide_line_geo = hou.Geometry()
-        self.guide_line_pts = [self.guide_line_geo.createPoint(), self.guide_line_geo.createPoint()]
-
-        self.guide_line_prim = self.guide_line_geo.createPolygon()
-        self.guide_line_prim.setIsClosed(False)
-        self.guide_line_prim.addVertex(self.guide_line_pts[0])
-        self.guide_line_prim.addVertex(self.guide_line_pts[1])
-
-        self.guide_line_drawable = hou.GeometryDrawable(
-            self.scene_viewer, hou.drawableGeometryType.Line, "auto_axis_guide_line"
-        )
-        self.guide_line_drawable.setGeometry(self.guide_line_geo)
-        self.guide_line_drawable.setParams({
-            "color1": self.color_options.colorFromName("PickedHandleColor"),
-            "line_width": 2.0
-        })
-        self.guide_line_drawable.show(False)
-
-    def _update_guide_line(self, origin, axis_dir):
-        if self.guide_line_drawable is None:
-            return
-        if origin is None or axis_dir is None or axis_dir.length() < 1e-6:
-            self.guide_line_drawable.show(False)
-            return
-
-        a = axis_dir.normalized()
-        self.guide_line_pts[0].setPosition(origin)
-        self.guide_line_pts[1].setPosition(origin + a * self.guide_len)
-
-        P = self.guide_line_geo.findPointAttrib("P")
-        if P is not None:
-            P.incrementDataId()
-        self.guide_line_geo.incrementModificationCounter()
-
-        self.guide_line_drawable.show(True)
-
-    def _hide_guide_line(self):
-        if self.guide_line_drawable is not None:
-            self.guide_line_drawable.show(False)
 
     # -------------------------------------------------------------------------
     # Screen projection + pick
@@ -964,11 +912,11 @@ class State(object):
             self.face_gadget.draw(handle)
             self._hide_edge_hover()
 
-        if self.guide_line_drawable is not None:
-            self.guide_line_drawable.draw(handle)
+        if self.guide_line is not None:
+            self.guide_line.draw(handle)
 
-        if self.edge_hover_drawable is not None:
-            self.edge_hover_drawable.draw(handle)
+        if self.edge_hover is not None:
+            self.edge_hover.draw(handle)
 
     def onMenuAction(self, kwargs):
         menu_item = kwargs.get("menu_item")
