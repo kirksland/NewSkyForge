@@ -1,0 +1,23 @@
+# Ignore other packages if needed (example)
+# OtherPackage/
+# SomeStudioTool/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Houdini caches / temp
+*.bgeo
+*.bgeo.sc
+*.sim
+*.dmp
+*.pic
+*.bak
+*.hipnc~
+*.hiplc~
+*.hip~
