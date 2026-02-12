@@ -1,35 +1,32 @@
 # 🌌 SkyForge (Houdini)
 
-**SkyForge** est un package Python pour **SideFX Houdini** orienté **outils interactifs dans le Scene Viewer** (Python Viewer States), avec une ambition principale : rendre la **modélisation** et surtout la **retopologie** plus **organique**, plus **instinctive**, directement dans le viewport.
+**SkyForge** is a Python package for **SideFX Houdini** focused on building **interactive Scene Viewer tools** using Python Viewer States.
 
-> Projet en cours : pour l’instant, SkyForge pose surtout les **fondations** (architecture, modules, points d’entrée).  
-> L’objectif final est d’en faire une **démo portfolio** centrée sur des outils de modélisation / retopo, et un mini **pipeline** (batch rendu, export USD, etc.).
+The main goal is to explore and develop **modeling and retopology workflows** that feel more **organic and gesture-driven**, directly in the viewport, while also providing a small **pipeline layer** (batch rendering, USD export, etc.).
 
----
-
-## ✨ Vision
-
-- **Retopo semi-auto** + outils interactifs
-- Travail “au geste” : *clic/drag/snap/guide* dans le **Scene Viewer**
-- Outils pensés comme des **Viewer States** (UX directe, fluide)
-- Une base de code modulaire pour faire évoluer :
-  - outils de modélisation / retopo
-  - outils de rendu batch
-  - export (USD, caches, etc.)
-
-Référence d’intention : une approche dans la lignée d’outils de modélisation Houdini modernes (ex : plugin “Modeleur”-like), sans chercher à le reproduire, mais en visant la même sensation de **sculpt / sketch / retopo rapide** dans le viewport.
+> Project status: SkyForge is currently in a **foundation phase**.  
+> The core architecture and modules are in place; modeling and retopo tools are built on top of this base.
 
 ---
 
-## ✅ État actuel
+## ✨ Goals
 
-SkyForge est en phase **foundation** :
-- structure de package `skyforge`
-- organisation par sous-modules (core / mesh / motion / draw / store / tools)
-- utilitaire de dev : **reload à chaud** pour itérer sans relancer Houdini
+- Interactive modeling and **semi-assisted retopology** tools
+- **Viewport-first** workflows (click / drag / snap / guides)
+- Tools designed as **Python Viewer States**
+- A **modular codebase** supporting:
+  - modeling and retopo tools
+  - batch rendering utilities
+  - export workflows (USD, caches, etc.)
 
-Les outils finaux (retopo, modelling) arrivent dans les prochaines itérations.
+The project is intended as a **tool development R&D / portfolio project** around Houdini, focusing on viewport UX, tool architecture, and pipeline-oriented utilities.
 
 ---
 
+## ✅ Current State
 
+- `skyforge` Python package structure in place
+- Modular organization (`core`, `mesh`, `motion`, `draw`, `store`, `tools`)
+- Development helper for **hot-reloading** modules in Houdini
+
+Core tools are built progressively on top of this foundation.
