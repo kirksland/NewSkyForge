@@ -3,6 +3,13 @@ import viewerstate.utils as su
 import resourceutils as ru
 
 from skyforge.forge_draw import LineFX
+from skyforge.forge_mesh import (
+    prim_points_unique,
+    prim_center,
+    connected_neighbors,
+    edge_midpoint,
+    edge_tangent,
+)
 
 
 class State(object):
@@ -58,11 +65,9 @@ class State(object):
 
         self.color_options = ru.ColorOptions(self.scene_viewer)
 
-        # --- guide line (LineFX) ---
+        # --- drawables ---
         self.guide_len = 0.3
         self.guide_line = None
-
-        # --- edge hover highlight (LineFX) ---
         self.edge_hover = None
 
         # --- callback guard ---
@@ -157,35 +162,7 @@ class State(object):
             self.edge_hover.hide()
 
     # -------------------------------------------------------------------------
-    # Selection / affected points
-    # -------------------------------------------------------------------------
-
-    def _prim_points_unique(self, prim):
-        if prim is None:
-            return []
-        seen = set()
-        out = []
-        for p in prim.points():
-            n = p.number()
-            if n in seen:
-                continue
-            seen.add(n)
-            out.append(n)
-        return out
-
-    def _prim_center(self, prim):
-        if prim is None:
-            return None
-        pts = prim.points()
-        if not pts:
-            return None
-        c = hou.Vector3(0, 0, 0)
-        for p in pts:
-            c += p.position()
-        return c / float(len(pts))
-
-    # -------------------------------------------------------------------------
-    # Local frames
+    # Local frames (kept for now — moved in refactor 3)
     # -------------------------------------------------------------------------
 
     def _frame_from_normal(self, origin, N):
@@ -228,7 +205,7 @@ class State(object):
         if prim is None:
             return None
 
-        origin = self._prim_center(prim)
+        origin = prim_center(prim)
         if origin is None:
             return None
 
@@ -240,32 +217,20 @@ class State(object):
         return self._frame_from_normal(origin, N)
 
     def _get_axes_for_space(self, space, sel):
-        """
-        space: "LOCAL" or "WORLD"
-        sel: "POINT" or "FACE"
-        Return (origin, axes_dict)
-        """
         if self._edit_geo is None:
             return None, None
 
         if sel == "FACE":
             prim = self._edit_geo.prim(self._primnum)
-            origin = self._prim_center(prim) if prim else None
+            origin = prim_center(prim) if prim else None
             if origin is None:
                 return None, None
             if space == "WORLD":
-                return origin, {
-                    "X": hou.Vector3(1, 0, 0),
-                    "Y": hou.Vector3(0, 1, 0),
-                    "Z": hou.Vector3(0, 0, 1),
-                }
+                return origin, {"X": hou.Vector3(1, 0, 0), "Y": hou.Vector3(0, 1, 0), "Z": hou.Vector3(0, 0, 1)}
+
             frame = self._prim_frame_from_normal(self._primnum)
             if frame is None:
-                return origin, {
-                    "X": hou.Vector3(1, 0, 0),
-                    "Y": hou.Vector3(0, 1, 0),
-                    "Z": hou.Vector3(0, 0, 1),
-                }
+                return origin, {"X": hou.Vector3(1, 0, 0), "Y": hou.Vector3(0, 1, 0), "Z": hou.Vector3(0, 0, 1)}
             o, T, B, N = frame
             return o, {"X": T, "Y": B, "Z": N}
 
@@ -276,50 +241,20 @@ class State(object):
             return None, None
 
         if space == "WORLD":
-            return origin, {
-                "X": hou.Vector3(1, 0, 0),
-                "Y": hou.Vector3(0, 1, 0),
-                "Z": hou.Vector3(0, 0, 1),
-            }
+            return origin, {"X": hou.Vector3(1, 0, 0), "Y": hou.Vector3(0, 1, 0), "Z": hou.Vector3(0, 0, 1)}
 
         frame = self._point_frame_from_avg_normal(self._ptnum)
         if frame is None:
-            return origin, {
-                "X": hou.Vector3(1, 0, 0),
-                "Y": hou.Vector3(0, 1, 0),
-                "Z": hou.Vector3(0, 0, 1),
-            }
+            return origin, {"X": hou.Vector3(1, 0, 0), "Y": hou.Vector3(0, 1, 0), "Z": hou.Vector3(0, 0, 1)}
         o, T, B, N = frame
         return o, {"X": T, "Y": B, "Z": N}
 
     # -------------------------------------------------------------------------
-    # EDGE helpers
+    # EDGE helpers (now uses forge_mesh)
     # -------------------------------------------------------------------------
 
-    def _connected_neighbors(self, ptnum):
-        """Neighbors around a point (by polygon adjacency)."""
-        if self._edit_geo is None:
-            return []
-        pt = self._edit_geo.point(ptnum)
-        if pt is None:
-            return []
-
-        nbrs = set()
-        for prim in pt.prims():
-            pts = prim.points()
-            try:
-                i = pts.index(pt)
-            except ValueError:
-                continue
-            if len(pts) < 2:
-                continue
-            nbrs.add(pts[(i - 1) % len(pts)].number())
-            nbrs.add(pts[(i + 1) % len(pts)].number())
-        return sorted(nbrs)
-
     def _pick_edge_from_mouse(self, origin, mouse_delta, ptnum):
-        """EDGE mode when sel==POINT: pick the best-connected edge direction."""
-        nbrs = self._connected_neighbors(ptnum)
+        nbrs = connected_neighbors(self._edit_geo, ptnum)
         if not nbrs:
             return None, 1.0
 
@@ -341,26 +276,8 @@ class State(object):
 
         return edge_dirs[key].normalized(), sign
 
-    def _edge_midpoint(self, p0, p1):
-        pt0 = self._edit_geo.point(p0) if self._edit_geo else None
-        pt1 = self._edit_geo.point(p1) if self._edit_geo else None
-        if pt0 is None or pt1 is None:
-            return None
-        return (pt0.position() + pt1.position()) * 0.5
-
-    def _edge_tangent(self, p0, p1):
-        pt0 = self._edit_geo.point(p0) if self._edit_geo else None
-        pt1 = self._edit_geo.point(p1) if self._edit_geo else None
-        if pt0 is None or pt1 is None:
-            return None
-        v = pt1.position() - pt0.position()
-        if v.length() < 1e-6:
-            return None
-        return v.normalized()
-
     def _pick_edge_axis_for_selected_edge(self, origin, mouse_delta, p0, p1):
-        """EDGE mode when sel==EDGE: use the tangent of the selected edge."""
-        t = self._edge_tangent(p0, p1)
+        t = edge_tangent(self._edit_geo, p0, p1)
         if t is None:
             return None, 1.0
         key, sign = self._pick_axis_from_mouse(origin, mouse_delta, {"T": t})
@@ -369,7 +286,7 @@ class State(object):
         return t, sign
 
     # -------------------------------------------------------------------------
-    # Stash sync (undo/redo safe)
+    # Stash sync (undo/redo safe) - kept for refactor 4
     # -------------------------------------------------------------------------
 
     def _geo_signature(self, geo):
@@ -425,7 +342,7 @@ class State(object):
             pass
 
     # -------------------------------------------------------------------------
-    # Stash helpers / editable geo
+    # Stash helpers / editable geo (kept for refactor 4)
     # -------------------------------------------------------------------------
 
     def _stash_has_geo(self):
@@ -624,16 +541,13 @@ class State(object):
         self.face_gadget = self.state_gadgets["face_gadget"]
         self.face_gadget.setGeometry(self._edit_geo)
         self.face_gadget.setParams({
-            "draw_color": self.color_options.colorFromName("HandleXAxisColor", alpha_name="LocateAlpha"),
+            "draw_color": [1,1,1,0.0],
         })
         self.face_gadget.show(True)
 
         self.edge_gadget = self.state_gadgets["edge_gadget"]
         self.edge_gadget.setGeometry(self._edit_geo)
-        # IMPORTANT: keep invisible so Houdini doesn't draw ALL edges
-        self.edge_gadget.setParams({
-            "draw_color": [1, 1, 1, 0.0],
-        })
+        self.edge_gadget.setParams({"draw_color": [1, 1, 1, 0.0]})
         self.edge_gadget.show(True)
 
         self._register_callbacks()
@@ -648,13 +562,12 @@ class State(object):
         ui_event = kwargs["ui_event"]
         reason = ui_event.reason()
 
-        # Only react if correct gadget for current selection mode
         gad = self.state_context.gadget()
         if self.select_mode == "POINT":
             ok = (gad == "point_gadget")
         elif self.select_mode == "EDGE":
             ok = (gad == "edge_gadget")
-        else:  # FACE
+        else:
             ok = (gad == "face_gadget")
 
         if not ok:
@@ -665,7 +578,6 @@ class State(object):
         if self._edit_geo is None:
             return False
 
-        # mouse pos
         try:
             mx, my = ui_event.device().mouseX(), ui_event.device().mouseY()
             cur_mouse = hou.Vector2(mx, my)
@@ -676,7 +588,6 @@ class State(object):
             self._pending = True
             self._start_mouse = cur_mouse
 
-            # snapshot modes for this drag
             self._drag_mode_used = self.mode
             self._drag_select_used = self.select_mode
             self._is_dragging = False
@@ -686,7 +597,6 @@ class State(object):
             self._drag_axis = None
             self._affected_ptnums = None
 
-            # capture selection
             if self.select_mode == "POINT":
                 ptnum = self.state_context.component1()
                 pt = self._edit_geo.point(ptnum)
@@ -694,11 +604,12 @@ class State(object):
                     return False
                 self._ptnum = ptnum
                 self._origin = pt.position()
+                self._affected_ptnums = [ptnum]   # ✅ IMPORTANT
+
 
             elif self.select_mode == "EDGE":
                 p0 = self.state_context.component1()
                 p1 = self.state_context.component2()
-
                 pt0 = self._edit_geo.point(p0)
                 pt1 = self._edit_geo.point(p1)
                 if pt0 is None or pt1 is None:
@@ -715,8 +626,8 @@ class State(object):
                 if prim is None:
                     return False
                 self._primnum = primnum
-                self._origin = self._prim_center(prim)
-                self._affected_ptnums = self._prim_points_unique(prim)
+                self._origin = prim_center(prim)
+                self._affected_ptnums = prim_points_unique(prim)
 
             self._hide_guide_line()
 
@@ -736,7 +647,6 @@ class State(object):
                 sel = self._drag_select_used or self.select_mode
                 origin = self._origin
 
-                # If FACE + mode EDGE -> fallback LOCAL
                 if sel == "FACE" and mode == "EDGE":
                     mode = "LOCAL"
 
@@ -746,7 +656,6 @@ class State(object):
                         if edge_dir is not None:
                             self._drag_axis = edge_dir * sign
                         else:
-                            # fallback LOCAL
                             origin2, axes = self._get_axes_for_space("LOCAL", "POINT")
                             if origin2 is not None and axes is not None:
                                 origin = origin2
@@ -760,7 +669,6 @@ class State(object):
                     elif sel == "EDGE":
                         t, sign = self._pick_edge_axis_for_selected_edge(origin, md, self._edge_p0, self._edge_p1)
                         if t is None:
-                            # fallback WORLD
                             axes = {"X": hou.Vector3(1, 0, 0), "Y": hou.Vector3(0, 1, 0), "Z": hou.Vector3(0, 0, 1)}
                             choice, sign = self._pick_axis_from_mouse(origin, md, axes)
                             if choice is None and reason != hou.uiEventReason.Changed:
@@ -771,7 +679,7 @@ class State(object):
                         else:
                             self._drag_axis = t * sign
 
-                    else:  # FACE (edge mode fallback local)
+                    else:
                         origin, axes = self._get_axes_for_space("LOCAL", "FACE")
                         if origin is None or axes is None:
                             return False
@@ -783,13 +691,11 @@ class State(object):
                         self._drag_axis = axes[choice].normalized() * sign
 
                 else:
-                    # mode LOCAL / WORLD
                     if sel == "EDGE":
                         origin = self._origin
                         if mode == "WORLD":
                             axes = {"X": hou.Vector3(1, 0, 0), "Y": hou.Vector3(0, 1, 0), "Z": hou.Vector3(0, 0, 1)}
                         else:
-                            # simple fallback: local based on p0
                             self._ptnum = self._edge_p0
                             origin2, axes = self._get_axes_for_space("LOCAL", "POINT")
                             if origin2 is None or axes is None:
@@ -811,7 +717,6 @@ class State(object):
                 self._pending = False
                 self._is_dragging = True
 
-            # Apply delta
             try:
                 delta = self.dragger.drag(ui_event)["delta_position"]
             except:
@@ -819,27 +724,12 @@ class State(object):
                     self._cleanup_drag()
                 return False
 
-            # Apply delta based on selection
-            if self.select_mode == "POINT":
-                pt = self._edit_geo.point(self._ptnum)
-                if pt is not None:
-                    pt.setPosition(pt.position() + delta)
+            if self._affected_ptnums:
+                for pn in self._affected_ptnums:
+                    p = self._edit_geo.point(pn)
+                    if p is not None:
+                        p.setPosition(p.position() + delta)
 
-            elif self.select_mode == "EDGE":
-                if self._affected_ptnums:
-                    for pn in self._affected_ptnums:
-                        p = self._edit_geo.point(pn)
-                        if p is not None:
-                            p.setPosition(p.position() + delta)
-
-            else:  # FACE
-                if self._affected_ptnums:
-                    for pn in self._affected_ptnums:
-                        p = self._edit_geo.point(pn)
-                        if p is not None:
-                            p.setPosition(p.position() + delta)
-
-            # refresh geo + stash
             P = self._edit_geo.findPointAttrib("P")
             if P is not None:
                 P.incrementDataId()
@@ -851,21 +741,18 @@ class State(object):
             except:
                 pass
 
-            # update guide origin
             if self.select_mode == "POINT":
                 pt = self._edit_geo.point(self._ptnum)
                 if pt is not None:
                     self._update_guide_line(pt.position(), self._drag_axis)
-
             elif self.select_mode == "EDGE":
-                mid = self._edge_midpoint(self._edge_p0, self._edge_p1)
+                mid = edge_midpoint(self._edit_geo, self._edge_p0, self._edge_p1)
                 if mid is not None:
                     self._update_guide_line(mid, self._drag_axis)
-
-            else:  # FACE
+            else:
                 prim = self._edit_geo.prim(self._primnum)
                 if prim is not None:
-                    c = self._prim_center(prim)
+                    c = prim_center(prim)
                     if c is not None:
                         self._update_guide_line(c, self._drag_axis)
 
@@ -883,7 +770,6 @@ class State(object):
         self._sync_from_stash_if_needed(force=False)
         handle = kwargs["draw_handle"]
 
-        # --- Hover highlight ONLY ---
         if self.select_mode == "POINT":
             if self.state_context.gadget() == "point_gadget":
                 self.point_gadget.setParams({"indices": [self.state_context.component1()]})
@@ -893,10 +779,7 @@ class State(object):
             self._hide_edge_hover()
 
         elif self.select_mode == "EDGE":
-            # draw gadget (invisible) for picking
             self.edge_gadget.draw(handle)
-
-            # draw only the hovered edge
             if self.state_context.gadget() == "edge_gadget":
                 p0 = self.state_context.component1()
                 p1 = self.state_context.component2()
@@ -904,7 +787,7 @@ class State(object):
             else:
                 self._hide_edge_hover()
 
-        else:  # FACE
+        else:
             if self.state_context.gadget() == "face_gadget":
                 self.face_gadget.setParams({"indices": [self.state_context.component1()]})
             else:
@@ -914,7 +797,6 @@ class State(object):
 
         if self.guide_line is not None:
             self.guide_line.draw(handle)
-
         if self.edge_hover is not None:
             self.edge_hover.draw(handle)
 
@@ -946,12 +828,10 @@ def createViewerStateTemplate():
     template = hou.ViewerStateTemplate(state_typename, state_label, state_cat)
     template.bindFactory(State)
 
-    # gadgets
     template.bindGadget(hou.drawableGeometryType.Point, "point_gadget", label="Point")
     template.bindGadget(hou.drawableGeometryType.Face, "face_gadget", label="Face")
     template.bindGadget(hou.drawableGeometryType.Line, "edge_gadget", label="Edge")
 
-    # hotkeys / menu actions
     hotkey_definitions = hou.PluginHotkeyDefinitions()
     menu = hou.ViewerStateMenu(state_typename + "_menu", state_label)
 
