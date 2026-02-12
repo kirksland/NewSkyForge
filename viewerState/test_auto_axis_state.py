@@ -9,13 +9,14 @@ from skyforge.forge_mesh import (
     connected_neighbors,
     edge_midpoint,
     edge_tangent,
+    apply_delta_to_points,
+    touch_point_positions,
 )
 from skyforge.forge_motion import (
     pick_axis_from_mouse,
     axes_for_space,
 )
 from skyforge.forge_store import ForgeStashSession
-from skyforge.forge_mesh import apply_delta_to_points, touch_point_positions
 
 
 class State(object):
@@ -306,8 +307,7 @@ class State(object):
 
         self.edge_gadget = self.state_gadgets["edge_gadget"]
         self.edge_gadget.setGeometry(self._edit_geo)
-        # keep invisible (avoid Houdini drawing all edges)
-        self.edge_gadget.setParams({"draw_color": [1, 1, 1, 0.0]})
+        self.edge_gadget.setParams({"draw_color": [1, 1, 1, 0.0]})  # invisible (avoid Houdini drawing all edges)
         self.edge_gadget.show(True)
 
         self._register_callbacks()
@@ -461,9 +461,10 @@ class State(object):
                         if mode == "WORLD":
                             axes = {"X": hou.Vector3(1, 0, 0), "Y": hou.Vector3(0, 1, 0), "Z": hou.Vector3(0, 0, 1)}
                         else:
-                            self._ptnum = self._edge_p0
+                            # local for edge: compute local axes from edge p0 without overwriting self._ptnum
+                            pt_for_local = self._edge_p0
                             origin2, axes = axes_for_space(
-                                self._edit_geo, "LOCAL", "POINT", self._ptnum, self._primnum, prim_center
+                                self._edit_geo, "LOCAL", "POINT", pt_for_local, self._primnum, prim_center
                             )
                             if origin2 is None or axes is None:
                                 axes = {"X": hou.Vector3(1, 0, 0), "Y": hou.Vector3(0, 1, 0), "Z": hou.Vector3(0, 0, 1)}
@@ -498,9 +499,7 @@ class State(object):
             apply_delta_to_points(self._edit_geo, self._affected_ptnums, delta)
             touch_point_positions(self._edit_geo)
 
-
             if self.store is not None:
-                self.store.edit_geo = self._edit_geo
                 self.store.push()
 
             # update guide origin
