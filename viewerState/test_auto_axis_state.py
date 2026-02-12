@@ -15,6 +15,7 @@ from skyforge.forge_motion import (
     axes_for_space,
 )
 from skyforge.forge_store import ForgeStashSession
+from skyforge.forge_mesh import apply_delta_to_points, touch_point_positions
 
 
 class State(object):
@@ -494,17 +495,9 @@ class State(object):
                     self._cleanup_drag()
                 return False
 
-            if self._affected_ptnums:
-                for pn in self._affected_ptnums:
-                    p = self._edit_geo.point(pn)
-                    if p is not None:
-                        p.setPosition(p.position() + delta)
+            apply_delta_to_points(self._edit_geo, self._affected_ptnums, delta)
+            touch_point_positions(self._edit_geo)
 
-            # refresh geo + push to stash
-            P = self._edit_geo.findPointAttrib("P")
-            if P is not None:
-                P.incrementDataId()
-            self._edit_geo.incrementModificationCounter()
 
             if self.store is not None:
                 self.store.edit_geo = self._edit_geo
