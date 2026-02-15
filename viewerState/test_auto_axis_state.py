@@ -1,3 +1,9 @@
+"""Viewer state used to test auto-axis transform and loop-cut interactions.
+
+The state edits a local `hou.Geometry`, keeps it synced with an internal stash SOP,
+and updates viewer gadgets/drawables as edits happen.
+"""
+
 import hou
 import viewerstate.utils as su
 import resourceutils as ru
@@ -20,6 +26,8 @@ from skyforge.forge_store import ForgeStashSession
 
 
 class State(object):
+    """Interactive SOP viewer state with move/cut tools and stash-backed edits."""
+
     HUD_TEMPLATE = {
         "title": "AutoAxisTest", "desc": "tool", "icon": "SOP_edit",
         "rows": [
@@ -28,10 +36,24 @@ class State(object):
 
             {"id": "selectmode", "label": "Select Mode", "key": "F", "value": "POINT"},
             {"id": "selectmode_g", "type": "choicegraph", "count": 3},
+
+            {"id": "selecttool", "label": "Select Tool", "key": "C", "value": "MOVE"},
+            {"id": "selecttool_g", "type": "choicegraph", "count": 2},
         ]
     }
 
+    # ---- HDA parms ----
+    LOOPCUT_SPEC_PARM = "edgeloop_spec"   # string parm: p<a>-<b>:<t>
+    LOOPCUT_ENABLE_PARM = None            # optional toggle/switch parm, or None
+
+    # ---- HDA internal SOP used for baking preview ----
+    CACHE_NODE = "cache_geo"              # NULL/OUT at end of chain to capture preview geo
+    STASH_RESET_PARM = "stashinput"       # button parm that resets stash from INPUT
+    STASH_NODE_NAME = "stash1"
+    INPUT_NODE_NAME = "INPUT"
+
     def __init__(self, state_name, scene_viewer):
+        """Build state runtime data; Houdini calls hooks later (onEnter/onDraw/...)."""
         self.state_name = state_name
         self.scene_viewer = scene_viewer
         self.dragger = hou.ViewerStateDragger("dragger")
@@ -46,8 +68,19 @@ class State(object):
         self.select_mode = "POINT"       # "POINT" / "EDGE" / "FACE"
         self._drag_select_used = None
 
+        # tool mode (move/cut)
+        self.tool_mode = "MOVE"          # "MOVE" / "CUT"
+
         self._is_dragging = False
         self._pending = False
+
+        # --- CUT session ---
+        self._cut_active = False
+        self._cut_p0 = -1
+        self._cut_p1 = -1
+        self._cut_t = 0.5
+        self._cut_mouse0 = None
+        self._cut_t0 = 0.5
 
         # current selection
         self._ptnum = -1
@@ -78,10 +111,136 @@ class State(object):
         self._cb_registered = False
 
     # -------------------------------------------------------------------------
+    # Loopcut helpers
+    # -------------------------------------------------------------------------
+
+    def _edge_t_from_mouse_ray(self, geo, a, b, ui_event):
+        """Return t in [0,1] along edge a->b from mouse ray (closest ray/segment)."""
+        if geo is None:
+            return 0.5
+
+        ptA = geo.point(a)
+        ptB = geo.point(b)
+        if ptA is None or ptB is None:
+            return 0.5
+
+        A = hou.Vector3(ptA.position())
+        B = hou.Vector3(ptB.position())
+        E = B - A
+        c = E.dot(E)
+        if c < 1e-16:
+            return 0.0
+
+        R0, Rd = ui_event.ray()
+        R0 = hou.Vector3(R0)
+        Rd = hou.Vector3(Rd)
+        if Rd.length() < 1e-16:
+            return 0.5
+        Rd = Rd.normalized()
+
+        # Closest points between ray (R0 + s*Rd, s>=0) and segment (A + t*E, t in [0,1])
+        w0 = R0 - A
+        a1 = 1.0
+        b1 = Rd.dot(E)
+        d1 = Rd.dot(w0)
+        e1 = E.dot(w0)
+        den = a1 * c - b1 * b1
+
+        if abs(den) < 1e-12:
+            t = e1 / c
+        else:
+            t = (a1 * e1 - b1 * d1) / den
+            s = (b1 * t - d1) / a1
+            if s < 0.0:
+                t = e1 / c
+
+        return max(0.0, min(1.0, t))
+
+    def _canonicalize_edge_and_t(self, a, b, t):
+        """Force a<b so the spec string is stable; invert t when swapping."""
+        if a > b:
+            a, b = b, a
+            t = 1.0 - t
+        return a, b, t
+
+    def _format_cut_spec(self, a, b, t):
+        """Encode one cut as a stable `p<a>-<b>:<t>` string."""
+        return f"p{a}-{b}:{t:.6f}"
+
+    def _commit_loopcut_spec(self, spec, append=False):
+        """Write spec to HDA parm, optionally append as newline list."""
+        if self.node is None:
+            return
+
+        parm = self.node.parm(self.LOOPCUT_SPEC_PARM)
+        if parm is None:
+            return
+
+        with hou.undos.group("Loop Cut Spec"):
+            if append:
+                cur = parm.evalAsString().strip()
+                parm.set((cur + "\n" + spec) if cur else spec)
+            else:
+                parm.set(spec)
+
+            if self.LOOPCUT_ENABLE_PARM:
+                p = self.node.parm(self.LOOPCUT_ENABLE_PARM)
+                if p is not None:
+                    p.set(1)
+
+    def _reset_cut_session(self):
+        """Clear transient cut-drag state."""
+        self._cut_active = False
+        self._cut_p0 = -1
+        self._cut_p1 = -1
+        self._cut_mouse0 = None
+        self._cut_t0 = 0.5
+        self._cut_t = 0.5
+
+    def _bake_from_cache_geo(self):
+        """
+        Bake the current preview (cache_geo output) into stash:
+        - cook cache node
+        - replace store.edit_geo + push to stash
+        - clear edgeloop_spec so we can accumulate cuts
+        """
+
+        if self.node is None or self.store is None:
+            return
+
+        cache = self.node.node(self.CACHE_NODE)
+        if cache is None:
+            # Uncomment if you want explicit feedback:
+            # print(f"[AutoAxisTest] Missing CACHE_NODE: {self.CACHE_NODE}")
+            return
+
+        try:
+            cache.cook(force=True)
+            cooked = cache.geometry()
+        except:
+            return
+
+        # Copy into a fresh geometry (avoid holding a live cooked ref)
+        new_geo = hou.Geometry()
+        new_geo.merge(cooked)
+
+        # Replace edit geo and push to stash
+        self.store.edit_geo = new_geo
+        self._edit_geo = new_geo
+        self._refresh_gadgets_geometry()
+        self.store.push()
+
+        # Clear spec after bake
+        parm = self.node.parm(self.LOOPCUT_SPEC_PARM)
+        if parm is not None:
+            parm.set("")
+
+    # -------------------------------------------------------------------------
     # HUD
     # -------------------------------------------------------------------------
 
     def _cycle_mode(self):
+        """Cycle transform space mode LOCAL -> WORLD -> EDGE."""
         order = ["LOCAL", "WORLD", "EDGE"]
         try:
             i = order.index(self.mode)
@@ -90,6 +249,7 @@ class State(object):
         self.mode = order[(i + 1) % len(order)]
 
     def _cycle_select_mode(self):
+        """Cycle selection mode POINT -> EDGE -> FACE."""
         order = ["POINT", "EDGE", "FACE"]
         try:
             i = order.index(self.select_mode)
@@ -97,7 +257,31 @@ class State(object):
             i = 0
         self.select_mode = order[(i + 1) % len(order)]
 
+    def _cycle_tool_mode(self):
+        """Cycle tool mode MOVE <-> CUT and enforce CUT prerequisites."""
+        order = ["MOVE", "CUT"]
+        try:
+            i = order.index(self.tool_mode)
+        except ValueError:
+            i = 0
+        self.tool_mode = order[(i + 1) % len(order)]
+
+        # NEW: when entering CUT, force EDGE selection mode
+        if self.tool_mode == "CUT":
+            self.select_mode = "EDGE"
+            self._drag_select_used = None   # safety: cancel cached drag select mode
+            # optional: cancel pending move drag
+            if self._pending or self._is_dragging or self._undo_opened:
+                self._cleanup_drag()
+            # optional: reset cut session if you use it
+            if hasattr(self, "_reset_cut_session"):
+                self._reset_cut_session()
+
+        self._hud_update()
+
+
     def _hud_update(self):
+        """Push current mode values to the viewer HUD."""
         try:
             mode_order = ["LOCAL", "WORLD", "EDGE"]
             mode_idx = mode_order.index(self.mode) if self.mode in mode_order else 0
@@ -105,11 +289,16 @@ class State(object):
             sel_order = ["POINT", "EDGE", "FACE"]
             sel_idx = sel_order.index(self.select_mode) if self.select_mode in sel_order else 0
 
+            tool_order = ["MOVE", "CUT"]
+            tool_idx = tool_order.index(self.tool_mode) if self.tool_mode in tool_order else 0
+
             updates = {
                 "mode": self.mode,
                 "mode_g": mode_idx,
                 "selectmode": self.select_mode,
                 "selectmode_g": sel_idx,
+                "selecttool": self.tool_mode,
+                "selecttool_g": tool_idx,
             }
             try:
                 self.scene_viewer.hudInfo(hud_values=updates)
@@ -123,11 +312,13 @@ class State(object):
     # -------------------------------------------------------------------------
 
     def _init_guide_line(self):
+        """Create guide drawable used during axis drag."""
         color = self.color_options.colorFromName("PickedHandleColor")
         self.guide_line = LineFX(self.scene_viewer, "auto_axis_guide_line", color, line_width=2.0)
         self.guide_line.hide()
 
     def _update_guide_line(self, origin, axis_dir):
+        """Update guide drawable from origin along selected axis."""
         if self.guide_line is None:
             return
         if origin is None or axis_dir is None or axis_dir.length() < 1e-6:
@@ -137,15 +328,18 @@ class State(object):
         self.guide_line.set_line(origin, origin + a * self.guide_len)
 
     def _hide_guide_line(self):
+        """Hide axis guide drawable."""
         if self.guide_line is not None:
             self.guide_line.hide()
 
     def _init_edge_hover(self):
+        """Create edge-hover drawable."""
         color = self.color_options.colorFromName("PickedHandleColor")
         self.edge_hover = LineFX(self.scene_viewer, "auto_axis_edge_hover", color, line_width=3.0)
         self.edge_hover.hide()
 
     def _update_edge_hover_from_points(self, p0, p1):
+        """Draw hovered edge segment using two point indices."""
         if self.edge_hover is None or self._edit_geo is None:
             return
         pt0 = self._edit_geo.point(p0)
@@ -156,6 +350,7 @@ class State(object):
         self.edge_hover.set_line(pt0.position(), pt1.position())
 
     def _hide_edge_hover(self):
+        """Hide edge-hover drawable."""
         if self.edge_hover is not None:
             self.edge_hover.hide()
 
@@ -164,7 +359,7 @@ class State(object):
     # -------------------------------------------------------------------------
 
     def _pick_connected_edge_dir_from_point(self, origin, mouse_delta, ptnum):
-        """Mode EDGE + Select POINT: pick the best neighbor edge direction."""
+        """Pick best connected-edge direction from a point using mouse direction."""
         if self._edit_geo is None:
             return None, 1.0
 
@@ -191,7 +386,7 @@ class State(object):
         return edge_dirs[key].normalized(), sign
 
     def _pick_axis_for_selected_edge(self, origin, mouse_delta, p0, p1):
-        """Mode EDGE + Select EDGE: drag along the selected edge tangent."""
+        """Pick edge tangent orientation from mouse direction for selected edge."""
         t = edge_tangent(self._edit_geo, p0, p1)
         if t is None:
             return None, 1.0
@@ -200,14 +395,46 @@ class State(object):
             return None, 1.0
         return t, sign
 
+    def _world_axes(self):
+        """Return fallback world-space axis vectors."""
+        return {
+            "X": hou.Vector3(1, 0, 0),
+            "Y": hou.Vector3(0, 1, 0),
+            "Z": hou.Vector3(0, 0, 1),
+        }
+
     # -------------------------------------------------------------------------
     # Callbacks
     # -------------------------------------------------------------------------
 
     def _onHdaParmChanged(self, **kwargs):
-        pass
+        """React to HDA parm changes that should reset edit geo from INPUT/stash."""
+        if self.node is None or self.store is None:
+            return
+
+        parm_tuple = kwargs.get("parm_tuple")
+        if parm_tuple is None:
+            return
+
+        if parm_tuple.name() != self.STASH_RESET_PARM:
+            return
+
+        if self._pending or self._is_dragging or self._undo_opened:
+            self._cleanup_drag()
+        self._reset_cut_session()
+
+        self._edit_geo = self.store.ensure_on_enter()
+        self._refresh_gadgets_geometry()
+        self._hide_guide_line()
+        self._hide_edge_hover()
+
+        try:
+            self.scene_viewer.curViewport().draw()
+        except:
+            pass
 
     def _register_callbacks(self):
+        """Attach node parm-change callback once per state entry."""
         if not self.node or self._cb_registered:
             return
         try:
@@ -217,6 +444,7 @@ class State(object):
             self._cb_registered = False
 
     def _unregister_callbacks(self):
+        """Detach node callback when state exits."""
         if not self.node or not self._cb_registered:
             return
         try:
@@ -230,6 +458,7 @@ class State(object):
     # -------------------------------------------------------------------------
 
     def _refresh_gadgets_geometry(self):
+        """Push current editable geometry to all registered gadgets."""
         if hasattr(self, "point_gadget") and self.point_gadget is not None:
             self.point_gadget.setGeometry(self._edit_geo)
         if hasattr(self, "face_gadget") and self.face_gadget is not None:
@@ -237,11 +466,31 @@ class State(object):
         if hasattr(self, "edge_gadget") and self.edge_gadget is not None:
             self.edge_gadget.setGeometry(self._edit_geo)
 
+    def _init_gadgets(self):
+        """Bind state gadgets once and initialize their visual params."""
+        self.point_gadget = self.state_gadgets["point_gadget"]
+        self.point_gadget.setParams({
+            "draw_color": self.color_options.colorFromName("HandleZAxisColor", alpha_name="LocateAlpha"),
+            "radius": 5.0
+        })
+        self.point_gadget.show(True)
+
+        self.face_gadget = self.state_gadgets["face_gadget"]
+        self.face_gadget.setParams({"draw_color": [1, 1, 1, 0.0]})
+        self.face_gadget.show(True)
+
+        self.edge_gadget = self.state_gadgets["edge_gadget"]
+        self.edge_gadget.setParams({"draw_color": [1, 1, 1, 0.0]})
+        self.edge_gadget.show(True)
+
+        self._refresh_gadgets_geometry()
+
     # -------------------------------------------------------------------------
     # Cleanup
     # -------------------------------------------------------------------------
 
     def _cleanup_drag(self):
+        """Close drag/undo state and reset drag-related caches."""
         self._pending = False
         try:
             self.dragger.endDrag()
@@ -279,49 +528,46 @@ class State(object):
     # -------------------------------------------------------------------------
 
     def onEnter(self, kwargs):
+        """Initialize state resources when the viewer state is entered."""
         self.node = kwargs["node"]
 
         self.scene_viewer.hudInfo(template=State.HUD_TEMPLATE)
         self._hud_update()
 
-        # --- store session ---
-        self.store = ForgeStashSession(self.node, stash_node_name="stash1", input_node_name="INPUT")
+        self.store = ForgeStashSession(
+            self.node,
+            stash_node_name=self.STASH_NODE_NAME,
+            input_node_name=self.INPUT_NODE_NAME,
+        )
         self._edit_geo = self.store.ensure_on_enter()
 
         self._init_guide_line()
         self._init_edge_hover()
-
-        # --- gadgets ---
-        self.point_gadget = self.state_gadgets["point_gadget"]
-        self.point_gadget.setGeometry(self._edit_geo)
-        self.point_gadget.setParams({
-            "draw_color": self.color_options.colorFromName("HandleZAxisColor", alpha_name="LocateAlpha"),
-            "radius": 5.0
-        })
-        self.point_gadget.show(True)
-
-        self.face_gadget = self.state_gadgets["face_gadget"]
-        self.face_gadget.setGeometry(self._edit_geo)
-        self.face_gadget.setParams({"draw_color": [1, 1, 1, 0.0]})
-        self.face_gadget.show(True)
-
-        self.edge_gadget = self.state_gadgets["edge_gadget"]
-        self.edge_gadget.setGeometry(self._edit_geo)
-        self.edge_gadget.setParams({"draw_color": [1, 1, 1, 0.0]})  # invisible (avoid Houdini drawing all edges)
-        self.edge_gadget.show(True)
+        self._init_gadgets()
 
         self._register_callbacks()
 
     def onExit(self, kwargs):
+        """Release callbacks and temporary state when leaving the viewer state."""
         self._cleanup_drag()
+        self._reset_cut_session()
         self._unregister_callbacks()
         self._hide_guide_line()
         self._hide_edge_hover()
 
     def onMouseEvent(self, kwargs):
+        """Main mouse interaction handler for move and cut tools."""
         ui_event = kwargs["ui_event"]
         reason = ui_event.reason()
 
+        # current mouse
+        try:
+            mx, my = ui_event.device().mouseX(), ui_event.device().mouseY()
+            cur_mouse = hou.Vector2(mx, my)
+        except:
+            return False
+
+        # Which gadget should be active for this select_mode?
         gad = self.state_context.gadget()
         if self.select_mode == "POINT":
             ok = (gad == "point_gadget")
@@ -330,21 +576,69 @@ class State(object):
         else:
             ok = (gad == "face_gadget")
 
+        # If not picking our gadget, cleanup move drag if needed and allow Houdini to handle
         if not ok:
             if self._pending or self._undo_opened or self._is_dragging:
                 self._cleanup_drag()
+
+            if self.tool_mode == "CUT" and self._cut_active and reason == hou.uiEventReason.Changed:
+                self._reset_cut_session()
+
             return False
 
         if self._edit_geo is None:
             return False
 
-        try:
-            mx, my = ui_event.device().mouseX(), ui_event.device().mouseY()
-            cur_mouse = hou.Vector2(mx, my)
-        except:
-            return False
+        # ---------------------------------------------------------------------
+        # CUT TOOL MODE: drag t + COMMIT on release (bake from cache_geo)
+        # ---------------------------------------------------------------------
+        if self.tool_mode == "CUT":
+            # Make sure move drag isn't active
+            if self._pending or self._is_dragging or self._undo_opened:
+                self._cleanup_drag()
 
-        # ---------------- START ----------------
+            if self.select_mode != "EDGE":
+                self._reset_cut_session()
+                return True
+
+            if reason == hou.uiEventReason.Start:
+                self._cut_active = True
+                self._cut_mouse0 = cur_mouse
+
+                self._cut_p0 = self.state_context.component1()
+                self._cut_p1 = self.state_context.component2()
+
+                self._cut_t0 = self._edge_t_from_mouse_ray(self._edit_geo, self._cut_p0, self._cut_p1, ui_event)
+                self._cut_t = self._cut_t0
+
+                a, b, t = self._canonicalize_edge_and_t(self._cut_p0, self._cut_p1, self._cut_t)
+                spec = self._format_cut_spec(a, b, t)
+                self._commit_loopcut_spec(spec, append=False)  # preview
+                return True
+
+            if reason in (hou.uiEventReason.Active, hou.uiEventReason.Changed):
+                if not self._cut_active:
+                    return True
+
+                self._cut_t = self._edge_t_from_mouse_ray(self._edit_geo, self._cut_p0, self._cut_p1, ui_event)
+
+                a, b, t = self._canonicalize_edge_and_t(self._cut_p0, self._cut_p1, self._cut_t)
+                spec = self._format_cut_spec(a, b, t)
+                self._commit_loopcut_spec(spec, append=False)  # preview live
+
+                if reason == hou.uiEventReason.Changed:
+                    # COMMIT: bake preview geo into stash, then clear spec
+                    self._bake_from_cache_geo()
+                    self._reset_cut_session()
+
+                return True
+
+            return True
+
+        # ---------------------------------------------------------------------
+        # MOVE TOOL MODE (existing behavior)
+        # ---------------------------------------------------------------------
+
         if reason == hou.uiEventReason.Start:
             self._pending = True
             self._start_mouse = cur_mouse
@@ -396,8 +690,7 @@ class State(object):
 
             return True
 
-        # ---------------- DRAG ----------------
-        elif reason in [hou.uiEventReason.Active, hou.uiEventReason.Changed]:
+        elif reason in (hou.uiEventReason.Active, hou.uiEventReason.Changed):
             if self._pending:
                 md = cur_mouse - self._start_mouse
 
@@ -405,11 +698,9 @@ class State(object):
                 sel = self._drag_select_used or self.select_mode
                 origin = self._origin
 
-                # FACE + EDGE mode -> fallback LOCAL
                 if sel == "FACE" and mode == "EDGE":
                     mode = "LOCAL"
 
-                # ---- Choose drag axis ----
                 if mode == "EDGE":
                     if sel == "POINT":
                         edge_dir, sign = self._pick_connected_edge_dir_from_point(origin, md, self._ptnum)
@@ -431,7 +722,7 @@ class State(object):
                     elif sel == "EDGE":
                         t, sign = self._pick_axis_for_selected_edge(origin, md, self._edge_p0, self._edge_p1)
                         if t is None:
-                            axes = {"X": hou.Vector3(1, 0, 0), "Y": hou.Vector3(0, 1, 0), "Z": hou.Vector3(0, 0, 1)}
+                            axes = self._world_axes()
                             choice, sign = pick_axis_from_mouse(self.scene_viewer, origin, md, axes)
                             if choice is None and reason != hou.uiEventReason.Changed:
                                 return True
@@ -441,7 +732,7 @@ class State(object):
                         else:
                             self._drag_axis = t * sign
 
-                    else:  # FACE (EDGE mode fallback LOCAL)
+                    else:
                         origin, axes = axes_for_space(
                             self._edit_geo, "LOCAL", "FACE", self._ptnum, self._primnum, prim_center
                         )
@@ -455,19 +746,17 @@ class State(object):
                         self._drag_axis = axes[choice].normalized() * sign
 
                 else:
-                    # mode LOCAL / WORLD
                     if sel == "EDGE":
                         origin = self._origin
                         if mode == "WORLD":
-                            axes = {"X": hou.Vector3(1, 0, 0), "Y": hou.Vector3(0, 1, 0), "Z": hou.Vector3(0, 0, 1)}
+                            axes = self._world_axes()
                         else:
-                            # local for edge: compute local axes from edge p0 without overwriting self._ptnum
                             pt_for_local = self._edge_p0
                             origin2, axes = axes_for_space(
                                 self._edit_geo, "LOCAL", "POINT", pt_for_local, self._primnum, prim_center
                             )
                             if origin2 is None or axes is None:
-                                axes = {"X": hou.Vector3(1, 0, 0), "Y": hou.Vector3(0, 1, 0), "Z": hou.Vector3(0, 0, 1)}
+                                axes = self._world_axes()
                     else:
                         origin, axes = axes_for_space(
                             self._edit_geo, mode, sel, self._ptnum, self._primnum, prim_center
@@ -482,13 +771,11 @@ class State(object):
                         choice, sign = "Z", 1.0
                     self._drag_axis = axes[choice].normalized() * sign
 
-                # start drag
                 self._update_guide_line(origin, self._drag_axis)
                 self.dragger.startDragAlongLine(ui_event, origin, self._drag_axis)
                 self._pending = False
                 self._is_dragging = True
 
-            # ---- Apply delta ----
             try:
                 delta = self.dragger.drag(ui_event)["delta_position"]
             except:
@@ -502,7 +789,6 @@ class State(object):
             if self.store is not None:
                 self.store.push()
 
-            # update guide origin
             if self.select_mode == "POINT":
                 pt = self._edit_geo.point(self._ptnum)
                 if pt is not None:
@@ -526,6 +812,7 @@ class State(object):
         return False
 
     def onDraw(self, kwargs):
+        """Draw gadgets/overlays and pull stash updates when needed."""
         if self.state_context.isPicking():
             return
 
@@ -553,10 +840,7 @@ class State(object):
             self._hide_edge_hover()
 
         elif self.select_mode == "EDGE":
-            # draw invisible gadget for picking
             self.edge_gadget.draw(handle)
-
-            # draw only hovered edge
             if self.state_context.gadget() == "edge_gadget":
                 p0 = self.state_context.component1()
                 p1 = self.state_context.component2()
@@ -578,6 +862,7 @@ class State(object):
             self.edge_hover.draw(handle)
 
     def onMenuAction(self, kwargs):
+        """Handle radial/context menu actions for mode switching."""
         menu_item = kwargs.get("menu_item")
 
         if menu_item == "cycle_mode":
@@ -594,10 +879,17 @@ class State(object):
             self._hud_update()
             return True
 
+        if menu_item == "cycle_tool":
+            if self._pending or self._is_dragging:
+                return True
+            self._cycle_tool_mode()
+            return True
+
         return False
 
 
 def createViewerStateTemplate():
+    """Register and return the viewer state template for Houdini."""
     state_typename = "AutoAxisTest"
     state_label = "AutoAxisTest"
     state_cat = hou.sopNodeTypeCategory()
@@ -622,7 +914,14 @@ def createViewerStateTemplate():
         "Cycle Select Mode (Point/Edge/Face)",
         hotkey=su.defineHotkey(hotkey_definitions, state_typename, "cycle_select", "f")
     )
+    menu.addActionItem(
+        "cycle_tool",
+        "Cycle tool Mode (move/cut)",
+        hotkey=su.defineHotkey(hotkey_definitions, state_typename, "cycle_tool", "c")
+    )
 
     template.bindMenu(menu)
     template.bindHotkeyDefinitions(hotkey_definitions)
     return template
+
+
