@@ -123,44 +123,6 @@ class State(object):
         """Return t in [0,1] along edge a->b from mouse ray (closest ray/segment)."""
         return edge_t_from_mouse_ray(geo, a, b, ui_event)
 
-
-        ptA = geo.point(a)
-        ptB = geo.point(b)
-        if ptA is None or ptB is None:
-            return 0.5
-
-        A = hou.Vector3(ptA.position())
-        B = hou.Vector3(ptB.position())
-        E = B - A
-        c = E.dot(E)
-        if c < 1e-16:
-            return 0.0
-
-        R0, Rd = ui_event.ray()
-        R0 = hou.Vector3(R0)
-        Rd = hou.Vector3(Rd)
-        if Rd.length() < 1e-16:
-            return 0.5
-        Rd = Rd.normalized()
-
-        # Closest points between ray (R0 + s*Rd, s>=0) and segment (A + t*E, t in [0,1])
-        w0 = R0 - A
-        a1 = 1.0
-        b1 = Rd.dot(E)
-        d1 = Rd.dot(w0)
-        e1 = E.dot(w0)
-        den = a1 * c - b1 * b1
-
-        if abs(den) < 1e-12:
-            t = e1 / c
-        else:
-            t = (a1 * e1 - b1 * d1) / den
-            s = (b1 * t - d1) / a1
-            if s < 0.0:
-                t = e1 / c
-
-        return max(0.0, min(1.0, t))
-
     def _canonicalize_edge_and_t(self, a, b, t):
         """Force a<b so the spec string is stable; invert t when swapping."""
         return canonicalize_edge_and_t(a, b, t)
@@ -183,23 +145,6 @@ class State(object):
             enable_parm_name=self.LOOPCUT_ENABLE_PARM,
             undo_label="Loop Cut Spec",
         )
-
-
-        parm = self.node.parm(self.LOOPCUT_SPEC_PARM)
-        if parm is None:
-            return
-
-        with hou.undos.group("Loop Cut Spec"):
-            if append:
-                cur = parm.evalAsString().strip()
-                parm.set((cur + "\n" + spec) if cur else spec)
-            else:
-                parm.set(spec)
-
-            if self.LOOPCUT_ENABLE_PARM:
-                p = self.node.parm(self.LOOPCUT_ENABLE_PARM)
-                if p is not None:
-                    p.set(1)
 
     def _reset_cut_session(self):
         """Clear transient cut-drag state."""
@@ -289,6 +234,10 @@ class State(object):
             # optional: reset cut session if you use it
             if hasattr(self, "_reset_cut_session"):
                 self._reset_cut_session()
+        else:
+            # When returning to MOVE, restore point selection by default.
+            self.select_mode = "POINT"
+            self._drag_select_used = None
 
         self._hud_update()
 
@@ -422,6 +371,11 @@ class State(object):
 
     def _onHdaParmChanged(self, **kwargs):
         """React to HDA parm changes that should reset edit geo from INPUT/stash."""
+        parm_tuple = kwargs.get("parm_tuple")
+        if parm_tuple is None:
+            return
+        if parm_tuple.name() != self.STASH_RESET_PARM:
+            return
 
         self._edit_geo = self.store.ensure_on_enter()
         self._refresh_gadgets_geometry()
@@ -515,6 +469,17 @@ class State(object):
             except:
                 pass
             self._undo_opened = False
+
+    def _finalize_active_interaction_for_mode_change(self):
+        """Commit/interrupt active interactions before switching modes."""
+        # If a CUT drag is active, commit preview into stash before leaving CUT flow.
+        if self.tool_mode == "CUT" and self._cut_active:
+            self._bake_from_cache_geo()
+            self._reset_cut_session()
+
+        # For MOVE drag (or any open drag/undo), interrupt cleanly.
+        if self._pending or self._is_dragging or self._undo_opened:
+            self._cleanup_drag()
 
     # -------------------------------------------------------------------------
     # Viewer state hooks
@@ -859,22 +824,19 @@ class State(object):
         menu_item = kwargs.get("menu_item")
 
         if menu_item == "cycle_mode":
-            if self._pending or self._is_dragging:
-                return True
+            self._finalize_active_interaction_for_mode_change()
             self._cycle_mode()
             self._hud_update()
             return True
 
         if menu_item == "cycle_select":
-            if self._pending or self._is_dragging:
-                return True
+            self._finalize_active_interaction_for_mode_change()
             self._cycle_select_mode()
             self._hud_update()
             return True
 
         if menu_item == "cycle_tool":
-            if self._pending or self._is_dragging:
-                return True
+            self._finalize_active_interaction_for_mode_change()
             self._cycle_tool_mode()
             return True
 
