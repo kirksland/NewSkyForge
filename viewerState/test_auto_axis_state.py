@@ -17,6 +17,11 @@ from skyforge.forge_mesh import (
     edge_tangent,
     apply_delta_to_points,
     touch_point_positions,
+    edge_t_from_mouse_ray,
+    canonicalize_edge_and_t,
+    format_cut_spec,
+    set_spec_parm,
+    clear_spec_parm,
 )
 from skyforge.forge_motion import (
     pick_axis_from_mouse,
@@ -116,8 +121,8 @@ class State(object):
 
     def _edge_t_from_mouse_ray(self, geo, a, b, ui_event):
         """Return t in [0,1] along edge a->b from mouse ray (closest ray/segment)."""
-        if geo is None:
-            return 0.5
+        return edge_t_from_mouse_ray(geo, a, b, ui_event)
+
 
         ptA = geo.point(a)
         ptB = geo.point(b)
@@ -158,19 +163,27 @@ class State(object):
 
     def _canonicalize_edge_and_t(self, a, b, t):
         """Force a<b so the spec string is stable; invert t when swapping."""
-        if a > b:
-            a, b = b, a
-            t = 1.0 - t
-        return a, b, t
+        return canonicalize_edge_and_t(a, b, t)
+
 
     def _format_cut_spec(self, a, b, t):
         """Encode one cut as a stable `p<a>-<b>:<t>` string."""
-        return f"p{a}-{b}:{t:.6f}"
+        return format_cut_spec(a, b, t)
+
 
     def _commit_loopcut_spec(self, spec, append=False):
         """Write spec to HDA parm, optionally append as newline list."""
         if self.node is None:
             return
+        set_spec_parm(
+            self.node,
+            self.LOOPCUT_SPEC_PARM,
+            spec,
+            append=append,
+            enable_parm_name=self.LOOPCUT_ENABLE_PARM,
+            undo_label="Loop Cut Spec",
+        )
+
 
         parm = self.node.parm(self.LOOPCUT_SPEC_PARM)
         if parm is None:
@@ -233,7 +246,7 @@ class State(object):
         # Clear spec after bake
         parm = self.node.parm(self.LOOPCUT_SPEC_PARM)
         if parm is not None:
-            parm.set("")
+            clear_spec_parm(self.node, self.LOOPCUT_SPEC_PARM)
 
     # -------------------------------------------------------------------------
     # HUD
@@ -409,29 +422,9 @@ class State(object):
 
     def _onHdaParmChanged(self, **kwargs):
         """React to HDA parm changes that should reset edit geo from INPUT/stash."""
-        if self.node is None or self.store is None:
-            return
-
-        parm_tuple = kwargs.get("parm_tuple")
-        if parm_tuple is None:
-            return
-
-        if parm_tuple.name() != self.STASH_RESET_PARM:
-            return
-
-        if self._pending or self._is_dragging or self._undo_opened:
-            self._cleanup_drag()
-        self._reset_cut_session()
 
         self._edit_geo = self.store.ensure_on_enter()
         self._refresh_gadgets_geometry()
-        self._hide_guide_line()
-        self._hide_edge_hover()
-
-        try:
-            self.scene_viewer.curViewport().draw()
-        except:
-            pass
 
     def _register_callbacks(self):
         """Attach node parm-change callback once per state entry."""
