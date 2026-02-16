@@ -132,9 +132,7 @@ class State(object):
         """Encode one cut as a stable `p<a>-<b>:<t>` string."""
         return format_cut_spec(a, b, t)
 
-
-    def _commit_loopcut_spec(self, spec, append=False):
-        """Write spec to HDA parm, optionally append as newline list."""
+    def _commit_loopcut_spec(self, spec, append=False, undoable=True):
         if self.node is None:
             return
         set_spec_parm(
@@ -144,6 +142,7 @@ class State(object):
             append=append,
             enable_parm_name=self.LOOPCUT_ENABLE_PARM,
             undo_label="Loop Cut Spec",
+            undoable=undoable,
         )
 
     def _reset_cut_session(self):
@@ -499,6 +498,8 @@ class State(object):
         )
         self._edit_geo = self.store.ensure_on_enter()
 
+        clear_spec_parm(self.node, self.LOOPCUT_SPEC_PARM)
+
         self._init_guide_line()
         self._init_edge_hover()
         self._init_gadgets()
@@ -571,8 +572,9 @@ class State(object):
 
                 a, b, t = self._canonicalize_edge_and_t(self._cut_p0, self._cut_p1, self._cut_t)
                 spec = self._format_cut_spec(a, b, t)
-                self._commit_loopcut_spec(spec, append=False)  # preview
+                self._commit_loopcut_spec(spec, append=False, undoable=False)  # preview (no undo spam)
                 return True
+            
 
             if reason in (hou.uiEventReason.Active, hou.uiEventReason.Changed):
                 if not self._cut_active:
@@ -582,11 +584,12 @@ class State(object):
 
                 a, b, t = self._canonicalize_edge_and_t(self._cut_p0, self._cut_p1, self._cut_t)
                 spec = self._format_cut_spec(a, b, t)
-                self._commit_loopcut_spec(spec, append=False)  # preview live
+                self._commit_loopcut_spec(spec, append=False, undoable=False)  # preview live (no undo spam)
 
                 if reason == hou.uiEventReason.Changed:
-                    # COMMIT: bake preview geo into stash, then clear spec
-                    self._bake_from_cache_geo()
+                    # COMMIT: one undo step for the whole cut
+                    with hou.undos.group("Loop Cut"):
+                        self._bake_from_cache_geo()
                     self._reset_cut_session()
 
                 return True
@@ -782,6 +785,7 @@ class State(object):
                 self._refresh_gadgets_geometry()
                 self._hide_guide_line()
                 self._hide_edge_hover()
+                clear_spec_parm(self.node, self.LOOPCUT_SPEC_PARM)
                 try:
                     self.scene_viewer.curViewport().draw()
                 except:
