@@ -110,11 +110,12 @@ def set_spec_parm(
     append: bool = False,
     enable_parm_name: str | None = None,
     undo_label: str = "Loop Cut Spec",
+    undoable: bool = True,
 ) -> None:
     """
     Write spec string into a node parm, optionally appending as a newline list.
 
-    This is deliberately low-level: it just manages parameters + undo.
+    undoable=False is intended for live preview updates during drag.
     """
     if node is None:
         return
@@ -123,7 +124,7 @@ def set_spec_parm(
     if parm is None:
         return
 
-    with hou.undos.group(undo_label):
+    def _do():
         if append:
             cur = parm.evalAsString()
             parm.set(append_spec(cur, spec))
@@ -135,6 +136,12 @@ def set_spec_parm(
             if p is not None:
                 p.set(1)
 
+    if undoable:
+        with hou.undos.group(undo_label):
+            _do()
+    else:
+        with hou.undos.disabler():
+            _do()
 
 def clear_spec_parm(
     node: hou.Node,
@@ -142,11 +149,14 @@ def clear_spec_parm(
     *,
     undo_label: str = "Clear Loop Cut Spec",
 ) -> None:
-    """Clear spec parm to empty string (undoable)."""
+    """Clear spec parm to empty string (NOT undoable)."""
     if node is None:
         return
     parm = node.parm(spec_parm_name) if spec_parm_name else None
     if parm is None:
         return
-    with hou.undos.group(undo_label):
+
+    # Important: this must NOT go on the undo stack,
+    # otherwise redo can resurrect the last spec.
+    with hou.undos.disabler():
         parm.set("")
