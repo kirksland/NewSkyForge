@@ -1,5 +1,5 @@
 
-<img src="config/icons/newForge4.png" alt="SkyForge Icon" width="500">
+<img src="config/icons/newForge4-white.svg" alt="SkyForge Icon" width="500">
 
 # 🌌 SkyForge 
 
