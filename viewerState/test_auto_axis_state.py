@@ -47,6 +47,7 @@ class State(object):
     STASH_RESET_PARM = "stashinput"       # button parm that resets stash from INPUT
     STASH_NODE_NAME = "stash1"
     INPUT_NODE_NAME = "INPUT"
+    POINT_RADIUS_UD_KEY = "AutoAxisTest.point_radius"
 
     def __init__(self, state_name, scene_viewer):
         """Build state runtime data; Houdini calls hooks later (onEnter/onDraw/...)."""
@@ -344,6 +345,28 @@ class State(object):
         if hasattr(self, "point_gadget") and self.point_gadget is not None:
             self.point_gadget.setParams({"radius": r})
 
+    def _load_point_radius_from_node(self):
+        """Load persisted point radius from node userData."""
+        if self.node is None:
+            return
+        try:
+            raw = self.node.userData(self.POINT_RADIUS_UD_KEY)
+            if not raw:
+                return
+            value = float(raw)
+            self.point_radius = max(self.point_radius_min, min(self.point_radius_max, value))
+        except:
+            pass
+
+    def _save_point_radius_to_node(self):
+        """Persist current point radius to node userData."""
+        if self.node is None:
+            return
+        try:
+            self.node.setUserData(self.POINT_RADIUS_UD_KEY, "{:.4f}".format(self.point_radius))
+        except:
+            pass
+
     def _change_point_radius(self, delta):
         """Increase/decrease point radius with clamping."""
         prev = self.point_radius
@@ -351,6 +374,7 @@ class State(object):
         if abs(self.point_radius - prev) < 1e-6:
             return
         self._apply_point_radius()
+        self._save_point_radius_to_node()
         self._hud_update()
 
     def _update_edge_hover_from_points(self, p0, p1):
@@ -565,6 +589,7 @@ class State(object):
         self.node = kwargs["node"]
 
         self.scene_viewer.hudInfo(template=State.HUD_TEMPLATE)
+        self._load_point_radius_from_node()
         self._hud_update()
 
         self.store = store.ForgeStashSession(
