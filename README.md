@@ -1,3 +1,6 @@
+
+<img src="config/icons/newForge4.png" alt="SkyForge Icon" width="500">
+
 # 🌌 SkyForge 
 
 **SkyForge** is a Python package for **SideFX Houdini** focused on building **interactive Scene Viewer tools** using Python Viewer States.
