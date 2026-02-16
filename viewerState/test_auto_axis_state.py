@@ -1,9 +1,3 @@
-"""Viewer state used to test auto-axis transform and loop-cut interactions.
-
-The state edits a local `hou.Geometry`, keeps it synced with an internal stash SOP,
-and updates viewer gadgets/drawables as edits happen.
-"""
-
 import hou
 import viewerstate.utils as su
 import resourceutils as ru
@@ -29,6 +23,17 @@ from skyforge.forge_motion import (
 )
 from skyforge.forge_store import ForgeStashSession
 
+#FIXME:  rendre le fichier moins god sans changer la logique.
+"""  Dans onMouseEvent, extraire juste 4 fonctions:
+
+        _cut_start(ui_event, cur_mouse)
+
+        _cut_update(ui_event, cur_mouse, reason)
+
+        _move_start(ui_event, cur_mouse)
+
+        _move_update(ui_event, cur_mouse, reason)
+"""
 
 class State(object):
     """Interactive SOP viewer state with move/cut tools and stash-backed edits."""
