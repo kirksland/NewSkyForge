@@ -33,6 +33,8 @@ class State(object):
 
             {"id": "selecttool", "label": "Select Tool", "key": "C", "value": "MOVE"},
             {"id": "selecttool_g", "type": "choicegraph", "count": 2},
+
+            {"id": "pointsize", "label": "Point Size", "key": "[ / ]", "value": "5.0"},
         ]
     }
 
@@ -90,6 +92,12 @@ class State(object):
         self._drag_axis = None
         self._undo_opened = False
 
+        self.point_radius = 5.0
+        self.point_radius_step = 1.0
+        self.point_radius_min = 1.0
+        self.point_radius_max = 24.0
+        self.point_hover_extra = 2.0
+
         self.node = None
         self.color_options = ru.ColorOptions(self.scene_viewer)
 
@@ -97,6 +105,8 @@ class State(object):
         self.guide_len = 0.3
         self.guide_line = None
         self.edge_hover = None
+        self.point_rest = None
+        self.point_hover = None
 
         # --- store/session ---
         self.store = None
@@ -254,6 +264,7 @@ class State(object):
                 "selectmode_g": sel_idx,
                 "selecttool": self.tool_mode,
                 "selecttool_g": tool_idx,
+                "pointsize": "{:.1f}".format(self.point_radius),
             }
             try:
                 self.scene_viewer.hudInfo(hud_values=updates)
@@ -293,6 +304,55 @@ class State(object):
         self.edge_hover = draw.LineFX(self.scene_viewer, "auto_axis_edge_hover", color, line_width=3.0)
         self.edge_hover.hide()
 
+    def _init_point_hover(self):
+        """Create point-hover drawable."""
+        color = self.color_options.colorFromName("PickedHandleColor")
+        self.point_hover = hou.GeometryDrawable(
+            self.scene_viewer,
+            hou.drawableGeometryType.Point,
+            "auto_axis_point_hover",
+        )
+        self.point_hover.setParams({
+            "color1": color,
+            "radius": self.point_radius + self.point_hover_extra,
+            "style": hou.drawableGeometryPointStyle.LinearCircle,
+        })
+        self.point_hover.show(False)
+
+    def _init_point_rest(self):
+        """Create rest-state point drawable (no global gadget hover tint)."""
+        color = self.color_options.colorFromName("HandleZAxisColor")
+        self.point_rest = hou.GeometryDrawable(
+            self.scene_viewer,
+            hou.drawableGeometryType.Point,
+            "auto_axis_point_rest",
+        )
+        self.point_rest.setParams({
+            "color1": color,
+            "radius": self.point_radius,
+            "style": hou.drawableGeometryPointStyle.LinearCircle,
+        })
+        self.point_rest.show(True)
+
+    def _apply_point_radius(self):
+        """Apply current point radius to all point drawables/gadget."""
+        r = float(self.point_radius)
+        if self.point_rest is not None:
+            self.point_rest.setParams({"radius": r})
+        if self.point_hover is not None:
+            self.point_hover.setParams({"radius": r + self.point_hover_extra})
+        if hasattr(self, "point_gadget") and self.point_gadget is not None:
+            self.point_gadget.setParams({"radius": r})
+
+    def _change_point_radius(self, delta):
+        """Increase/decrease point radius with clamping."""
+        prev = self.point_radius
+        self.point_radius = max(self.point_radius_min, min(self.point_radius_max, self.point_radius + delta))
+        if abs(self.point_radius - prev) < 1e-6:
+            return
+        self._apply_point_radius()
+        self._hud_update()
+
     def _update_edge_hover_from_points(self, p0, p1):
         """Draw hovered edge segment using two point indices."""
         if self.edge_hover is None or self._edit_geo is None:
@@ -308,6 +368,23 @@ class State(object):
         """Hide edge-hover drawable."""
         if self.edge_hover is not None:
             self.edge_hover.hide()
+
+    def _update_point_hover(self, ptnum):
+        """Highlight one hovered point without filtering base point gadget."""
+        if self.point_hover is None or self._edit_geo is None:
+            return
+        pt = self._edit_geo.point(ptnum)
+        if pt is None:
+            self._hide_point_hover()
+            return
+        self.point_hover.setGeometry(self._edit_geo)
+        self.point_hover.setParams({"indices": [ptnum]})
+        self.point_hover.show(True)
+
+    def _hide_point_hover(self):
+        """Hide point-hover drawable."""
+        if self.point_hover is not None:
+            self.point_hover.show(False)
 
     # -------------------------------------------------------------------------
     # Axis / edge pick helpers
@@ -401,6 +478,8 @@ class State(object):
         """Push current editable geometry to all registered gadgets."""
         if hasattr(self, "point_gadget") and self.point_gadget is not None:
             self.point_gadget.setGeometry(self._edit_geo)
+        if self.point_rest is not None:
+            self.point_rest.setGeometry(self._edit_geo)
         if hasattr(self, "face_gadget") and self.face_gadget is not None:
             self.face_gadget.setGeometry(self._edit_geo)
         if hasattr(self, "edge_gadget") and self.edge_gadget is not None:
@@ -410,8 +489,9 @@ class State(object):
         """Bind state gadgets once and initialize their visual params."""
         self.point_gadget = self.state_gadgets["point_gadget"]
         self.point_gadget.setParams({
-            "draw_color": self.color_options.colorFromName("HandleZAxisColor", alpha_name="LocateAlpha"),
-            "radius": 5.0
+            # Keep gadget pickable but visually neutral; rest/hover visuals are custom drawables.
+            "draw_color": [1, 1, 1, 0.0],
+            "radius": self.point_radius
         })
         self.point_gadget.show(True)
 
@@ -424,6 +504,7 @@ class State(object):
         self.edge_gadget.show(True)
 
         self._refresh_gadgets_geometry()
+        self._apply_point_radius()
 
     # -------------------------------------------------------------------------
     # Cleanup
@@ -439,6 +520,7 @@ class State(object):
 
         self._hide_guide_line()
         self._hide_edge_hover()
+        self._hide_point_hover()
 
         self._is_dragging = False
         self._drag_mode_used = None
@@ -496,6 +578,8 @@ class State(object):
 
         self._init_guide_line()
         self._init_edge_hover()
+        self._init_point_rest()
+        self._init_point_hover()
         self._init_gadgets()
 
         self._register_callbacks()
@@ -507,6 +591,7 @@ class State(object):
         self._unregister_callbacks()
         self._hide_guide_line()
         self._hide_edge_hover()
+        self._hide_point_hover()
 
     def onMouseEvent(self, kwargs):
         """Main mouse interaction handler for move and cut tools."""
@@ -779,6 +864,7 @@ class State(object):
                 self._refresh_gadgets_geometry()
                 self._hide_guide_line()
                 self._hide_edge_hover()
+                self._hide_point_hover()
                 mesh.clear_spec_parm(self.node, self.LOOPCUT_SPEC_PARM)
                 try:
                     self.scene_viewer.curViewport().draw()
@@ -788,15 +874,18 @@ class State(object):
         handle = kwargs["draw_handle"]
 
         if self.select_mode == "POINT":
-            if self.state_context.gadget() == "point_gadget":
-                self.point_gadget.setParams({"indices": [self.state_context.component1()]})
-            else:
-                self.point_gadget.setParams({"indices": []})
+            if self.point_rest is not None:
+                self.point_rest.draw(handle)
             self.point_gadget.draw(handle)
+            if self.state_context.gadget() == "point_gadget":
+                self._update_point_hover(self.state_context.component1())
+            else:
+                self._hide_point_hover()
             self._hide_edge_hover()
 
         elif self.select_mode == "EDGE":
             self.edge_gadget.draw(handle)
+            self._hide_point_hover()
             if self.state_context.gadget() == "edge_gadget":
                 p0 = self.state_context.component1()
                 p1 = self.state_context.component2()
@@ -805,17 +894,16 @@ class State(object):
                 self._hide_edge_hover()
 
         else:  # FACE
-            if self.state_context.gadget() == "face_gadget":
-                self.face_gadget.setParams({"indices": [self.state_context.component1()]})
-            else:
-                self.face_gadget.setParams({"indices": []})
             self.face_gadget.draw(handle)
+            self._hide_point_hover()
             self._hide_edge_hover()
 
         if self.guide_line is not None:
             self.guide_line.draw(handle)
         if self.edge_hover is not None:
             self.edge_hover.draw(handle)
+        if self.point_hover is not None:
+            self.point_hover.draw(handle)
 
     def onMenuAction(self, kwargs):
         """Handle radial/context menu actions for mode switching."""
@@ -836,6 +924,14 @@ class State(object):
         if menu_item == "cycle_tool":
             self._finalize_active_interaction_for_mode_change()
             self._cycle_tool_mode()
+            return True
+
+        if menu_item == "point_size_up":
+            self._change_point_radius(self.point_radius_step)
+            return True
+
+        if menu_item == "point_size_down":
+            self._change_point_radius(-self.point_radius_step)
             return True
 
         return False
@@ -871,6 +967,16 @@ def createViewerStateTemplate():
         "cycle_tool",
         "Cycle tool Mode (move/cut)",
         hotkey=su.defineHotkey(hotkey_definitions, state_typename, "cycle_tool", "c")
+    )
+    menu.addActionItem(
+        "point_size_up",
+        "Point Size +",
+        hotkey=su.defineHotkey(hotkey_definitions, state_typename, "point_size_up", "]")
+    )
+    menu.addActionItem(
+        "point_size_down",
+        "Point Size -",
+        hotkey=su.defineHotkey(hotkey_definitions, state_typename, "point_size_down", "[")
     )
 
     template.bindMenu(menu)
