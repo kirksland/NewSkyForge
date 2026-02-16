@@ -1,4 +1,4 @@
-# 🌌 SkyForge (Houdini)
+# 🌌 SkyForge 
 
 **SkyForge** is a Python package for **SideFX Houdini** focused on building **interactive Scene Viewer tools** using Python Viewer States.
 
