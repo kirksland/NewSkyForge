@@ -7,7 +7,7 @@ from skyforge import forge_mesh as mesh
 from skyforge import forge_motion as motion
 from skyforge import forge_store as store
 
-#FIXME:  rendre le fichier moins god sans changer la logique.
+#TODO:  rendre le fichier moins god sans changer la logique.
 """  Dans onMouseEvent, extraire juste 4 fonctions:
 
         _cut_start(ui_event, cur_mouse)
@@ -926,6 +926,8 @@ class State(object):
             self._cycle_tool_mode()
             return True
 
+
+        #FIXME: mettre les etats qui doivent etre stoké dans un node user data pour pouvoir les restaurer a l'entree de l'etat et les garder a jour en cas de changement hors de l'etat 
         if menu_item == "point_size_up":
             self._change_point_radius(self.point_radius_step)
             return True
