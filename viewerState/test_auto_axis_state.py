@@ -2,26 +2,10 @@ import hou
 import viewerstate.utils as su
 import resourceutils as ru
 
-from skyforge.forge_draw import LineFX
-from skyforge.forge_mesh import (
-    prim_points_unique,
-    prim_center,
-    connected_neighbors,
-    edge_midpoint,
-    edge_tangent,
-    apply_delta_to_points,
-    touch_point_positions,
-    edge_t_from_mouse_ray,
-    canonicalize_edge_and_t,
-    format_cut_spec,
-    set_spec_parm,
-    clear_spec_parm,
-)
-from skyforge.forge_motion import (
-    pick_axis_from_mouse,
-    axes_for_space,
-)
-from skyforge.forge_store import ForgeStashSession
+from skyforge import forge_draw as draw
+from skyforge import forge_mesh as mesh
+from skyforge import forge_motion as motion
+from skyforge import forge_store as store
 
 #FIXME:  rendre le fichier moins god sans changer la logique.
 """  Dans onMouseEvent, extraire juste 4 fonctions:
@@ -126,21 +110,21 @@ class State(object):
 
     def _edge_t_from_mouse_ray(self, geo, a, b, ui_event):
         """Return t in [0,1] along edge a->b from mouse ray (closest ray/segment)."""
-        return edge_t_from_mouse_ray(geo, a, b, ui_event)
+        return mesh.edge_t_from_mouse_ray(geo, a, b, ui_event)
 
     def _canonicalize_edge_and_t(self, a, b, t):
         """Force a<b so the spec string is stable; invert t when swapping."""
-        return canonicalize_edge_and_t(a, b, t)
+        return mesh.canonicalize_edge_and_t(a, b, t)
 
 
     def _format_cut_spec(self, a, b, t):
         """Encode one cut as a stable `p<a>-<b>:<t>` string."""
-        return format_cut_spec(a, b, t)
+        return mesh.format_cut_spec(a, b, t)
 
     def _commit_loopcut_spec(self, spec, append=False, undoable=True):
         if self.node is None:
             return
-        set_spec_parm(
+        mesh.set_spec_parm(
             self.node,
             self.LOOPCUT_SPEC_PARM,
             spec,
@@ -195,7 +179,7 @@ class State(object):
         # Clear spec after bake
         parm = self.node.parm(self.LOOPCUT_SPEC_PARM)
         if parm is not None:
-            clear_spec_parm(self.node, self.LOOPCUT_SPEC_PARM)
+            mesh.clear_spec_parm(self.node, self.LOOPCUT_SPEC_PARM)
 
     # -------------------------------------------------------------------------
     # HUD
@@ -218,6 +202,11 @@ class State(object):
         except ValueError:
             i = 0
         self.select_mode = order[(i + 1) % len(order)]
+
+        # If selection mode changes while cutting, leave CUT and return to MOVE.
+        if self.tool_mode == "CUT":
+            self.tool_mode = "MOVE"
+            self._reset_cut_session()
 
     def _cycle_tool_mode(self):
         """Cycle tool mode MOVE <-> CUT and enforce CUT prerequisites."""
@@ -274,13 +263,13 @@ class State(object):
             pass
 
     # -------------------------------------------------------------------------
-    # Drawables (LineFX)
+    # Drawables (draw.LineFX)
     # -------------------------------------------------------------------------
 
     def _init_guide_line(self):
         """Create guide drawable used during axis drag."""
         color = self.color_options.colorFromName("PickedHandleColor")
-        self.guide_line = LineFX(self.scene_viewer, "auto_axis_guide_line", color, line_width=2.0)
+        self.guide_line = draw.LineFX(self.scene_viewer, "auto_axis_guide_line", color, line_width=2.0)
         self.guide_line.hide()
 
     def _update_guide_line(self, origin, axis_dir):
@@ -301,7 +290,7 @@ class State(object):
     def _init_edge_hover(self):
         """Create edge-hover drawable."""
         color = self.color_options.colorFromName("PickedHandleColor")
-        self.edge_hover = LineFX(self.scene_viewer, "auto_axis_edge_hover", color, line_width=3.0)
+        self.edge_hover = draw.LineFX(self.scene_viewer, "auto_axis_edge_hover", color, line_width=3.0)
         self.edge_hover.hide()
 
     def _update_edge_hover_from_points(self, p0, p1):
@@ -329,7 +318,7 @@ class State(object):
         if self._edit_geo is None:
             return None, 1.0
 
-        nbrs = connected_neighbors(self._edit_geo, ptnum)
+        nbrs = mesh.connected_neighbors(self._edit_geo, ptnum)
         if not nbrs:
             return None, 1.0
 
@@ -345,7 +334,7 @@ class State(object):
         if not edge_dirs:
             return None, 1.0
 
-        key, sign = pick_axis_from_mouse(self.scene_viewer, origin, mouse_delta, edge_dirs)
+        key, sign = motion.pick_axis_from_mouse(self.scene_viewer, origin, mouse_delta, edge_dirs)
         if key is None:
             return None, 1.0
 
@@ -353,10 +342,10 @@ class State(object):
 
     def _pick_axis_for_selected_edge(self, origin, mouse_delta, p0, p1):
         """Pick edge tangent orientation from mouse direction for selected edge."""
-        t = edge_tangent(self._edit_geo, p0, p1)
+        t = mesh.edge_tangent(self._edit_geo, p0, p1)
         if t is None:
             return None, 1.0
-        key, sign = pick_axis_from_mouse(self.scene_viewer, origin, mouse_delta, {"T": t})
+        key, sign = motion.pick_axis_from_mouse(self.scene_viewer, origin, mouse_delta, {"T": t})
         if key is None:
             return None, 1.0
         return t, sign
@@ -496,14 +485,14 @@ class State(object):
         self.scene_viewer.hudInfo(template=State.HUD_TEMPLATE)
         self._hud_update()
 
-        self.store = ForgeStashSession(
+        self.store = store.ForgeStashSession(
             self.node,
             stash_node_name=self.STASH_NODE_NAME,
             input_node_name=self.INPUT_NODE_NAME,
         )
         self._edit_geo = self.store.ensure_on_enter()
 
-        clear_spec_parm(self.node, self.LOOPCUT_SPEC_PARM)
+        mesh.clear_spec_parm(self.node, self.LOOPCUT_SPEC_PARM)
 
         self._init_guide_line()
         self._init_edge_hover()
@@ -643,8 +632,8 @@ class State(object):
                 if prim is None:
                     return False
                 self._primnum = primnum
-                self._origin = prim_center(prim)
-                self._affected_ptnums = prim_points_unique(prim)
+                self._origin = mesh.prim_center(prim)
+                self._affected_ptnums = mesh.prim_points_unique(prim)
 
             self._hide_guide_line()
 
@@ -673,12 +662,12 @@ class State(object):
                         if edge_dir is not None:
                             self._drag_axis = edge_dir * sign
                         else:
-                            origin2, axes = axes_for_space(
-                                self._edit_geo, "LOCAL", "POINT", self._ptnum, self._primnum, prim_center
+                            origin2, axes = motion.axes_for_space(
+                                self._edit_geo, "LOCAL", "POINT", self._ptnum, self._primnum, mesh.prim_center
                             )
                             if origin2 is not None and axes is not None:
                                 origin = origin2
-                            choice, sign = pick_axis_from_mouse(self.scene_viewer, origin, md, axes)
+                            choice, sign = motion.pick_axis_from_mouse(self.scene_viewer, origin, md, axes)
                             if choice is None and reason != hou.uiEventReason.Changed:
                                 return True
                             if choice is None:
@@ -689,7 +678,7 @@ class State(object):
                         t, sign = self._pick_axis_for_selected_edge(origin, md, self._edge_p0, self._edge_p1)
                         if t is None:
                             axes = self._world_axes()
-                            choice, sign = pick_axis_from_mouse(self.scene_viewer, origin, md, axes)
+                            choice, sign = motion.pick_axis_from_mouse(self.scene_viewer, origin, md, axes)
                             if choice is None and reason != hou.uiEventReason.Changed:
                                 return True
                             if choice is None:
@@ -699,12 +688,12 @@ class State(object):
                             self._drag_axis = t * sign
 
                     else:
-                        origin, axes = axes_for_space(
-                            self._edit_geo, "LOCAL", "FACE", self._ptnum, self._primnum, prim_center
+                        origin, axes = motion.axes_for_space(
+                            self._edit_geo, "LOCAL", "FACE", self._ptnum, self._primnum, mesh.prim_center
                         )
                         if origin is None or axes is None:
                             return False
-                        choice, sign = pick_axis_from_mouse(self.scene_viewer, origin, md, axes)
+                        choice, sign = motion.pick_axis_from_mouse(self.scene_viewer, origin, md, axes)
                         if choice is None and reason != hou.uiEventReason.Changed:
                             return True
                         if choice is None:
@@ -718,19 +707,19 @@ class State(object):
                             axes = self._world_axes()
                         else:
                             pt_for_local = self._edge_p0
-                            origin2, axes = axes_for_space(
-                                self._edit_geo, "LOCAL", "POINT", pt_for_local, self._primnum, prim_center
+                            origin2, axes = motion.axes_for_space(
+                                self._edit_geo, "LOCAL", "POINT", pt_for_local, self._primnum, mesh.prim_center
                             )
                             if origin2 is None or axes is None:
                                 axes = self._world_axes()
                     else:
-                        origin, axes = axes_for_space(
-                            self._edit_geo, mode, sel, self._ptnum, self._primnum, prim_center
+                        origin, axes = motion.axes_for_space(
+                            self._edit_geo, mode, sel, self._ptnum, self._primnum, mesh.prim_center
                         )
                         if origin is None or axes is None:
                             return False
 
-                    choice, sign = pick_axis_from_mouse(self.scene_viewer, origin, md, axes)
+                    choice, sign = motion.pick_axis_from_mouse(self.scene_viewer, origin, md, axes)
                     if choice is None and reason != hou.uiEventReason.Changed:
                         return True
                     if choice is None:
@@ -749,8 +738,8 @@ class State(object):
                     self._cleanup_drag()
                 return False
 
-            apply_delta_to_points(self._edit_geo, self._affected_ptnums, delta)
-            touch_point_positions(self._edit_geo)
+            mesh.apply_delta_to_points(self._edit_geo, self._affected_ptnums, delta)
+            mesh.touch_point_positions(self._edit_geo)
 
             if self.store is not None:
                 self.store.push()
@@ -760,13 +749,13 @@ class State(object):
                 if pt is not None:
                     self._update_guide_line(pt.position(), self._drag_axis)
             elif self.select_mode == "EDGE":
-                mid = edge_midpoint(self._edit_geo, self._edge_p0, self._edge_p1)
+                mid = mesh.edge_midpoint(self._edit_geo, self._edge_p0, self._edge_p1)
                 if mid is not None:
                     self._update_guide_line(mid, self._drag_axis)
             else:
                 prim = self._edit_geo.prim(self._primnum)
                 if prim is not None:
-                    c = prim_center(prim)
+                    c = mesh.prim_center(prim)
                     if c is not None:
                         self._update_guide_line(c, self._drag_axis)
 
@@ -790,7 +779,7 @@ class State(object):
                 self._refresh_gadgets_geometry()
                 self._hide_guide_line()
                 self._hide_edge_hover()
-                clear_spec_parm(self.node, self.LOOPCUT_SPEC_PARM)
+                mesh.clear_spec_parm(self.node, self.LOOPCUT_SPEC_PARM)
                 try:
                     self.scene_viewer.curViewport().draw()
                 except:
