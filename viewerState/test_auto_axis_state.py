@@ -2,28 +2,12 @@ import hou
 import viewerstate.utils as su
 import resourceutils as ru
 
-from skyforge.forge_draw import LineFX
-from skyforge.forge_mesh import (
-    prim_points_unique,
-    prim_center,
-    connected_neighbors,
-    edge_midpoint,
-    edge_tangent,
-    apply_delta_to_points,
-    touch_point_positions,
-    edge_t_from_mouse_ray,
-    canonicalize_edge_and_t,
-    format_cut_spec,
-    set_spec_parm,
-    clear_spec_parm,
-)
-from skyforge.forge_motion import (
-    pick_axis_from_mouse,
-    axes_for_space,
-)
-from skyforge.forge_store import ForgeStashSession
+from skyforge import forge_draw as draw
+from skyforge import forge_mesh as mesh
+from skyforge import forge_motion as motion
+from skyforge import forge_store as store
 
-#FIXME:  rendre le fichier moins god sans changer la logique.
+#TODO:  rendre le fichier moins god sans changer la logique.
 """  Dans onMouseEvent, extraire juste 4 fonctions:
 
         _cut_start(ui_event, cur_mouse)
@@ -49,6 +33,8 @@ class State(object):
 
             {"id": "selecttool", "label": "Select Tool", "key": "C", "value": "MOVE"},
             {"id": "selecttool_g", "type": "choicegraph", "count": 2},
+
+            {"id": "pointsize", "label": "Point Size", "key": "[ / ]", "value": "5.0"},
         ]
     }
 
@@ -61,6 +47,7 @@ class State(object):
     STASH_RESET_PARM = "stashinput"       # button parm that resets stash from INPUT
     STASH_NODE_NAME = "stash1"
     INPUT_NODE_NAME = "INPUT"
+    POINT_RADIUS_UD_KEY = "AutoAxisTest.point_radius"
 
     def __init__(self, state_name, scene_viewer):
         """Build state runtime data; Houdini calls hooks later (onEnter/onDraw/...)."""
@@ -106,6 +93,12 @@ class State(object):
         self._drag_axis = None
         self._undo_opened = False
 
+        self.point_radius = 5.0
+        self.point_radius_step = 1.0
+        self.point_radius_min = 1.0
+        self.point_radius_max = 24.0
+        self.point_hover_extra = 2.0
+
         self.node = None
         self.color_options = ru.ColorOptions(self.scene_viewer)
 
@@ -113,6 +106,8 @@ class State(object):
         self.guide_len = 0.3
         self.guide_line = None
         self.edge_hover = None
+        self.point_rest = None
+        self.point_hover = None
 
         # --- store/session ---
         self.store = None
@@ -126,21 +121,21 @@ class State(object):
 
     def _edge_t_from_mouse_ray(self, geo, a, b, ui_event):
         """Return t in [0,1] along edge a->b from mouse ray (closest ray/segment)."""
-        return edge_t_from_mouse_ray(geo, a, b, ui_event)
+        return mesh.edge_t_from_mouse_ray(geo, a, b, ui_event)
 
     def _canonicalize_edge_and_t(self, a, b, t):
         """Force a<b so the spec string is stable; invert t when swapping."""
-        return canonicalize_edge_and_t(a, b, t)
+        return mesh.canonicalize_edge_and_t(a, b, t)
 
 
     def _format_cut_spec(self, a, b, t):
         """Encode one cut as a stable `p<a>-<b>:<t>` string."""
-        return format_cut_spec(a, b, t)
+        return mesh.format_cut_spec(a, b, t)
 
     def _commit_loopcut_spec(self, spec, append=False, undoable=True):
         if self.node is None:
             return
-        set_spec_parm(
+        mesh.set_spec_parm(
             self.node,
             self.LOOPCUT_SPEC_PARM,
             spec,
@@ -195,7 +190,7 @@ class State(object):
         # Clear spec after bake
         parm = self.node.parm(self.LOOPCUT_SPEC_PARM)
         if parm is not None:
-            clear_spec_parm(self.node, self.LOOPCUT_SPEC_PARM)
+            mesh.clear_spec_parm(self.node, self.LOOPCUT_SPEC_PARM)
 
     # -------------------------------------------------------------------------
     # HUD
@@ -218,6 +213,11 @@ class State(object):
         except ValueError:
             i = 0
         self.select_mode = order[(i + 1) % len(order)]
+
+        # If selection mode changes while cutting, leave CUT and return to MOVE.
+        if self.tool_mode == "CUT":
+            self.tool_mode = "MOVE"
+            self._reset_cut_session()
 
     def _cycle_tool_mode(self):
         """Cycle tool mode MOVE <-> CUT and enforce CUT prerequisites."""
@@ -265,6 +265,7 @@ class State(object):
                 "selectmode_g": sel_idx,
                 "selecttool": self.tool_mode,
                 "selecttool_g": tool_idx,
+                "pointsize": "{:.1f}".format(self.point_radius),
             }
             try:
                 self.scene_viewer.hudInfo(hud_values=updates)
@@ -274,13 +275,13 @@ class State(object):
             pass
 
     # -------------------------------------------------------------------------
-    # Drawables (LineFX)
+    # Drawables (draw.LineFX)
     # -------------------------------------------------------------------------
 
     def _init_guide_line(self):
         """Create guide drawable used during axis drag."""
         color = self.color_options.colorFromName("PickedHandleColor")
-        self.guide_line = LineFX(self.scene_viewer, "auto_axis_guide_line", color, line_width=2.0)
+        self.guide_line = draw.LineFX(self.scene_viewer, "auto_axis_guide_line", color, line_width=2.0)
         self.guide_line.hide()
 
     def _update_guide_line(self, origin, axis_dir):
@@ -301,8 +302,80 @@ class State(object):
     def _init_edge_hover(self):
         """Create edge-hover drawable."""
         color = self.color_options.colorFromName("PickedHandleColor")
-        self.edge_hover = LineFX(self.scene_viewer, "auto_axis_edge_hover", color, line_width=3.0)
+        self.edge_hover = draw.LineFX(self.scene_viewer, "auto_axis_edge_hover", color, line_width=3.0)
         self.edge_hover.hide()
+
+    def _init_point_hover(self):
+        """Create point-hover drawable."""
+        color = self.color_options.colorFromName("PickedHandleColor")
+        self.point_hover = hou.GeometryDrawable(
+            self.scene_viewer,
+            hou.drawableGeometryType.Point,
+            "auto_axis_point_hover",
+        )
+        self.point_hover.setParams({
+            "color1": color,
+            "radius": self.point_radius + self.point_hover_extra,
+            "style": hou.drawableGeometryPointStyle.LinearCircle,
+        })
+        self.point_hover.show(False)
+
+    def _init_point_rest(self):
+        """Create rest-state point drawable (no global gadget hover tint)."""
+        color = self.color_options.colorFromName("HandleZAxisColor")
+        self.point_rest = hou.GeometryDrawable(
+            self.scene_viewer,
+            hou.drawableGeometryType.Point,
+            "auto_axis_point_rest",
+        )
+        self.point_rest.setParams({
+            "color1": color,
+            "radius": self.point_radius,
+            "style": hou.drawableGeometryPointStyle.LinearCircle,
+        })
+        self.point_rest.show(True)
+
+    def _apply_point_radius(self):
+        """Apply current point radius to all point drawables/gadget."""
+        r = float(self.point_radius)
+        if self.point_rest is not None:
+            self.point_rest.setParams({"radius": r})
+        if self.point_hover is not None:
+            self.point_hover.setParams({"radius": r + self.point_hover_extra})
+        if hasattr(self, "point_gadget") and self.point_gadget is not None:
+            self.point_gadget.setParams({"radius": r})
+
+    def _load_point_radius_from_node(self):
+        """Load persisted point radius from node userData."""
+        if self.node is None:
+            return
+        try:
+            raw = self.node.userData(self.POINT_RADIUS_UD_KEY)
+            if not raw:
+                return
+            value = float(raw)
+            self.point_radius = max(self.point_radius_min, min(self.point_radius_max, value))
+        except:
+            pass
+
+    def _save_point_radius_to_node(self):
+        """Persist current point radius to node userData."""
+        if self.node is None:
+            return
+        try:
+            self.node.setUserData(self.POINT_RADIUS_UD_KEY, "{:.4f}".format(self.point_radius))
+        except:
+            pass
+
+    def _change_point_radius(self, delta):
+        """Increase/decrease point radius with clamping."""
+        prev = self.point_radius
+        self.point_radius = max(self.point_radius_min, min(self.point_radius_max, self.point_radius + delta))
+        if abs(self.point_radius - prev) < 1e-6:
+            return
+        self._apply_point_radius()
+        self._save_point_radius_to_node()
+        self._hud_update()
 
     def _update_edge_hover_from_points(self, p0, p1):
         """Draw hovered edge segment using two point indices."""
@@ -320,6 +393,23 @@ class State(object):
         if self.edge_hover is not None:
             self.edge_hover.hide()
 
+    def _update_point_hover(self, ptnum):
+        """Highlight one hovered point without filtering base point gadget."""
+        if self.point_hover is None or self._edit_geo is None:
+            return
+        pt = self._edit_geo.point(ptnum)
+        if pt is None:
+            self._hide_point_hover()
+            return
+        self.point_hover.setGeometry(self._edit_geo)
+        self.point_hover.setParams({"indices": [ptnum]})
+        self.point_hover.show(True)
+
+    def _hide_point_hover(self):
+        """Hide point-hover drawable."""
+        if self.point_hover is not None:
+            self.point_hover.show(False)
+
     # -------------------------------------------------------------------------
     # Axis / edge pick helpers
     # -------------------------------------------------------------------------
@@ -329,7 +419,7 @@ class State(object):
         if self._edit_geo is None:
             return None, 1.0
 
-        nbrs = connected_neighbors(self._edit_geo, ptnum)
+        nbrs = mesh.connected_neighbors(self._edit_geo, ptnum)
         if not nbrs:
             return None, 1.0
 
@@ -345,7 +435,7 @@ class State(object):
         if not edge_dirs:
             return None, 1.0
 
-        key, sign = pick_axis_from_mouse(self.scene_viewer, origin, mouse_delta, edge_dirs)
+        key, sign = motion.pick_axis_from_mouse(self.scene_viewer, origin, mouse_delta, edge_dirs)
         if key is None:
             return None, 1.0
 
@@ -353,10 +443,10 @@ class State(object):
 
     def _pick_axis_for_selected_edge(self, origin, mouse_delta, p0, p1):
         """Pick edge tangent orientation from mouse direction for selected edge."""
-        t = edge_tangent(self._edit_geo, p0, p1)
+        t = mesh.edge_tangent(self._edit_geo, p0, p1)
         if t is None:
             return None, 1.0
-        key, sign = pick_axis_from_mouse(self.scene_viewer, origin, mouse_delta, {"T": t})
+        key, sign = motion.pick_axis_from_mouse(self.scene_viewer, origin, mouse_delta, {"T": t})
         if key is None:
             return None, 1.0
         return t, sign
@@ -412,6 +502,8 @@ class State(object):
         """Push current editable geometry to all registered gadgets."""
         if hasattr(self, "point_gadget") and self.point_gadget is not None:
             self.point_gadget.setGeometry(self._edit_geo)
+        if self.point_rest is not None:
+            self.point_rest.setGeometry(self._edit_geo)
         if hasattr(self, "face_gadget") and self.face_gadget is not None:
             self.face_gadget.setGeometry(self._edit_geo)
         if hasattr(self, "edge_gadget") and self.edge_gadget is not None:
@@ -421,8 +513,9 @@ class State(object):
         """Bind state gadgets once and initialize their visual params."""
         self.point_gadget = self.state_gadgets["point_gadget"]
         self.point_gadget.setParams({
-            "draw_color": self.color_options.colorFromName("HandleZAxisColor", alpha_name="LocateAlpha"),
-            "radius": 5.0
+            # Keep gadget pickable but visually neutral; rest/hover visuals are custom drawables.
+            "draw_color": [1, 1, 1, 0.0],
+            "radius": self.point_radius
         })
         self.point_gadget.show(True)
 
@@ -435,6 +528,7 @@ class State(object):
         self.edge_gadget.show(True)
 
         self._refresh_gadgets_geometry()
+        self._apply_point_radius()
 
     # -------------------------------------------------------------------------
     # Cleanup
@@ -450,6 +544,7 @@ class State(object):
 
         self._hide_guide_line()
         self._hide_edge_hover()
+        self._hide_point_hover()
 
         self._is_dragging = False
         self._drag_mode_used = None
@@ -494,19 +589,22 @@ class State(object):
         self.node = kwargs["node"]
 
         self.scene_viewer.hudInfo(template=State.HUD_TEMPLATE)
+        self._load_point_radius_from_node()
         self._hud_update()
 
-        self.store = ForgeStashSession(
+        self.store = store.ForgeStashSession(
             self.node,
             stash_node_name=self.STASH_NODE_NAME,
             input_node_name=self.INPUT_NODE_NAME,
         )
         self._edit_geo = self.store.ensure_on_enter()
 
-        clear_spec_parm(self.node, self.LOOPCUT_SPEC_PARM)
+        mesh.clear_spec_parm(self.node, self.LOOPCUT_SPEC_PARM)
 
         self._init_guide_line()
         self._init_edge_hover()
+        self._init_point_rest()
+        self._init_point_hover()
         self._init_gadgets()
 
         self._register_callbacks()
@@ -518,6 +616,7 @@ class State(object):
         self._unregister_callbacks()
         self._hide_guide_line()
         self._hide_edge_hover()
+        self._hide_point_hover()
 
     def onMouseEvent(self, kwargs):
         """Main mouse interaction handler for move and cut tools."""
@@ -643,8 +742,8 @@ class State(object):
                 if prim is None:
                     return False
                 self._primnum = primnum
-                self._origin = prim_center(prim)
-                self._affected_ptnums = prim_points_unique(prim)
+                self._origin = mesh.prim_center(prim)
+                self._affected_ptnums = mesh.prim_points_unique(prim)
 
             self._hide_guide_line()
 
@@ -673,12 +772,12 @@ class State(object):
                         if edge_dir is not None:
                             self._drag_axis = edge_dir * sign
                         else:
-                            origin2, axes = axes_for_space(
-                                self._edit_geo, "LOCAL", "POINT", self._ptnum, self._primnum, prim_center
+                            origin2, axes = motion.axes_for_space(
+                                self._edit_geo, "LOCAL", "POINT", self._ptnum, self._primnum, mesh.prim_center
                             )
                             if origin2 is not None and axes is not None:
                                 origin = origin2
-                            choice, sign = pick_axis_from_mouse(self.scene_viewer, origin, md, axes)
+                            choice, sign = motion.pick_axis_from_mouse(self.scene_viewer, origin, md, axes)
                             if choice is None and reason != hou.uiEventReason.Changed:
                                 return True
                             if choice is None:
@@ -689,7 +788,7 @@ class State(object):
                         t, sign = self._pick_axis_for_selected_edge(origin, md, self._edge_p0, self._edge_p1)
                         if t is None:
                             axes = self._world_axes()
-                            choice, sign = pick_axis_from_mouse(self.scene_viewer, origin, md, axes)
+                            choice, sign = motion.pick_axis_from_mouse(self.scene_viewer, origin, md, axes)
                             if choice is None and reason != hou.uiEventReason.Changed:
                                 return True
                             if choice is None:
@@ -699,12 +798,12 @@ class State(object):
                             self._drag_axis = t * sign
 
                     else:
-                        origin, axes = axes_for_space(
-                            self._edit_geo, "LOCAL", "FACE", self._ptnum, self._primnum, prim_center
+                        origin, axes = motion.axes_for_space(
+                            self._edit_geo, "LOCAL", "FACE", self._ptnum, self._primnum, mesh.prim_center
                         )
                         if origin is None or axes is None:
                             return False
-                        choice, sign = pick_axis_from_mouse(self.scene_viewer, origin, md, axes)
+                        choice, sign = motion.pick_axis_from_mouse(self.scene_viewer, origin, md, axes)
                         if choice is None and reason != hou.uiEventReason.Changed:
                             return True
                         if choice is None:
@@ -718,19 +817,19 @@ class State(object):
                             axes = self._world_axes()
                         else:
                             pt_for_local = self._edge_p0
-                            origin2, axes = axes_for_space(
-                                self._edit_geo, "LOCAL", "POINT", pt_for_local, self._primnum, prim_center
+                            origin2, axes = motion.axes_for_space(
+                                self._edit_geo, "LOCAL", "POINT", pt_for_local, self._primnum, mesh.prim_center
                             )
                             if origin2 is None or axes is None:
                                 axes = self._world_axes()
                     else:
-                        origin, axes = axes_for_space(
-                            self._edit_geo, mode, sel, self._ptnum, self._primnum, prim_center
+                        origin, axes = motion.axes_for_space(
+                            self._edit_geo, mode, sel, self._ptnum, self._primnum, mesh.prim_center
                         )
                         if origin is None or axes is None:
                             return False
 
-                    choice, sign = pick_axis_from_mouse(self.scene_viewer, origin, md, axes)
+                    choice, sign = motion.pick_axis_from_mouse(self.scene_viewer, origin, md, axes)
                     if choice is None and reason != hou.uiEventReason.Changed:
                         return True
                     if choice is None:
@@ -749,8 +848,8 @@ class State(object):
                     self._cleanup_drag()
                 return False
 
-            apply_delta_to_points(self._edit_geo, self._affected_ptnums, delta)
-            touch_point_positions(self._edit_geo)
+            mesh.apply_delta_to_points(self._edit_geo, self._affected_ptnums, delta)
+            mesh.touch_point_positions(self._edit_geo)
 
             if self.store is not None:
                 self.store.push()
@@ -760,13 +859,13 @@ class State(object):
                 if pt is not None:
                     self._update_guide_line(pt.position(), self._drag_axis)
             elif self.select_mode == "EDGE":
-                mid = edge_midpoint(self._edit_geo, self._edge_p0, self._edge_p1)
+                mid = mesh.edge_midpoint(self._edit_geo, self._edge_p0, self._edge_p1)
                 if mid is not None:
                     self._update_guide_line(mid, self._drag_axis)
             else:
                 prim = self._edit_geo.prim(self._primnum)
                 if prim is not None:
-                    c = prim_center(prim)
+                    c = mesh.prim_center(prim)
                     if c is not None:
                         self._update_guide_line(c, self._drag_axis)
 
@@ -790,7 +889,8 @@ class State(object):
                 self._refresh_gadgets_geometry()
                 self._hide_guide_line()
                 self._hide_edge_hover()
-                clear_spec_parm(self.node, self.LOOPCUT_SPEC_PARM)
+                self._hide_point_hover()
+                mesh.clear_spec_parm(self.node, self.LOOPCUT_SPEC_PARM)
                 try:
                     self.scene_viewer.curViewport().draw()
                 except:
@@ -799,15 +899,18 @@ class State(object):
         handle = kwargs["draw_handle"]
 
         if self.select_mode == "POINT":
-            if self.state_context.gadget() == "point_gadget":
-                self.point_gadget.setParams({"indices": [self.state_context.component1()]})
-            else:
-                self.point_gadget.setParams({"indices": []})
+            if self.point_rest is not None:
+                self.point_rest.draw(handle)
             self.point_gadget.draw(handle)
+            if self.state_context.gadget() == "point_gadget":
+                self._update_point_hover(self.state_context.component1())
+            else:
+                self._hide_point_hover()
             self._hide_edge_hover()
 
         elif self.select_mode == "EDGE":
             self.edge_gadget.draw(handle)
+            self._hide_point_hover()
             if self.state_context.gadget() == "edge_gadget":
                 p0 = self.state_context.component1()
                 p1 = self.state_context.component2()
@@ -816,17 +919,16 @@ class State(object):
                 self._hide_edge_hover()
 
         else:  # FACE
-            if self.state_context.gadget() == "face_gadget":
-                self.face_gadget.setParams({"indices": [self.state_context.component1()]})
-            else:
-                self.face_gadget.setParams({"indices": []})
             self.face_gadget.draw(handle)
+            self._hide_point_hover()
             self._hide_edge_hover()
 
         if self.guide_line is not None:
             self.guide_line.draw(handle)
         if self.edge_hover is not None:
             self.edge_hover.draw(handle)
+        if self.point_hover is not None:
+            self.point_hover.draw(handle)
 
     def onMenuAction(self, kwargs):
         """Handle radial/context menu actions for mode switching."""
@@ -847,6 +949,16 @@ class State(object):
         if menu_item == "cycle_tool":
             self._finalize_active_interaction_for_mode_change()
             self._cycle_tool_mode()
+            return True
+
+
+        #FIXME: mettre les etats qui doivent etre stoké dans un node user data pour pouvoir les restaurer a l'entree de l'etat et les garder a jour en cas de changement hors de l'etat 
+        if menu_item == "point_size_up":
+            self._change_point_radius(self.point_radius_step)
+            return True
+
+        if menu_item == "point_size_down":
+            self._change_point_radius(-self.point_radius_step)
             return True
 
         return False
@@ -882,6 +994,16 @@ def createViewerStateTemplate():
         "cycle_tool",
         "Cycle tool Mode (move/cut)",
         hotkey=su.defineHotkey(hotkey_definitions, state_typename, "cycle_tool", "c")
+    )
+    menu.addActionItem(
+        "point_size_up",
+        "Point Size +",
+        hotkey=su.defineHotkey(hotkey_definitions, state_typename, "point_size_up", "]")
+    )
+    menu.addActionItem(
+        "point_size_down",
+        "Point Size -",
+        hotkey=su.defineHotkey(hotkey_definitions, state_typename, "point_size_down", "[")
     )
 
     template.bindMenu(menu)
