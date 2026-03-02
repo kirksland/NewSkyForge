@@ -1,6 +1,5 @@
 
 <img src="config/icons/newForge4-white.svg" alt="SkyForge Icon" width="350">
-# SkyForge
 
 **Development Architecture for Advanced Houdini Tools**
 
