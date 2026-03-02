@@ -1,35 +1,128 @@
 
 <img src="config/icons/newForge4-white.svg" alt="SkyForge Icon" width="500">
+# SkyForge
 
-# 🌌 SkyForge 
+**Development Architecture for Advanced Houdini Tools**
 
-**SkyForge** is a Python package for **SideFX Houdini** focused on building **interactive Scene Viewer tools** using Python Viewer States.
+SkyForge is a structured development framework built on top of **SideFX Houdini**, designed to support the creation of complex, interactive, and technically robust tools.
 
-The main goal is to explore and develop **modeling and retopology workflows** that feel more **organic and gesture-driven**, directly in the viewport, while also providing a small **pipeline layer** (batch rendering, USD export, etc.).
+It is not a replacement for Houdini’s native toolset.  
+Houdini already provides a complete and powerful environment.
 
-> Project status: SkyForge is currently in a **foundation phase**.  
-> The core architecture and modules are in place; modeling and retopo tools are built on top of this base.
+SkyForge exists to address a different problem:
 
----
-
-## ✨ Goals
-
-- Interactive modeling and **semi-assisted retopology** tools
-- **Viewport-first** workflows (click / drag / snap / guides)
-- Tools designed as **Python Viewer States**
-- A **modular codebase** supporting:
-  - modeling and retopo tools
-  - batch rendering utilities
-  - export workflows (USD, caches, etc.)
-
-The project is intended as a **tool development R&D / portfolio project** around Houdini, focusing on viewport UX, tool architecture, and pipeline-oriented utilities.
+> How do you design advanced, user-friendly, technically controlled tools inside Houdini without fighting architectural limitations?
 
 ---
 
-## ✅ Current State
+## Why This Architecture Exists
 
-- `skyforge` Python package structure in place
-- Modular organization (`core`, `mesh`, `motion`, `draw`, `store`, `tools`)
-- Development helper for **hot-reloading** modules in Houdini
+When developing advanced modeling or topology-driven tools in Houdini, several structural challenges appear:
 
-Core tools are built progressively on top of this foundation.
+- Some viewport UX behaviors are not exposed through Python.
+- Certain internal selection and traversal mechanisms are not accessible.
+- SOP networks are extremely powerful, but complex interactive tools quickly become difficult to maintain.
+- Mixing interaction logic, geometry processing, and state management leads to fragile systems.
+
+SkyForge was created to impose structure where ad-hoc scripting becomes limiting.
+
+The goal is not to replace Houdini.
+
+The goal is to build **a clear, layered development architecture on top of it.**
+
+---
+
+## Architectural Philosophy
+
+SkyForge enforces strict separation of concerns through distinct layers.
+
+### 1 — Interaction Layer
+Python Viewer States are responsible only for:
+
+- Input handling
+- Gesture logic
+- Viewport feedback
+- Tool state management
+
+This layer does not perform heavy geometry logic.
+It orchestrates behavior.
+
+---
+
+### 2 — Core Logic Layer
+A dedicated Python / C++ module handles:
+
+- Deterministic topology logic
+- Reusable data structures
+- Explicit traversal systems
+- Algorithmic building blocks
+- Operations independent from UI
+
+This layer is interaction-agnostic.
+It defines rules, not interface.
+
+---
+
+### 3 — Execution Layer (SOP / HDK)
+Geometry mutation and processing are handled through:
+
+- Modular SOP blocks
+- Custom HDK nodes when required
+- Controlled caching strategies
+- Explicit data flow between operations
+
+This layer executes.  
+It does not decide.
+
+---
+
+## Design Intent
+
+SkyForge aims to make advanced tool development:
+
+- Modular
+- Predictable
+- Testable
+- Maintainable
+- Extensible
+
+It provides:
+
+- A reusable core module
+- A consistent interaction architecture
+- A structured way to build HDAs
+- A disciplined development methodology
+
+The modeling and retopology tools built on top of this architecture are applications of the framework — not its definition.
+
+---
+
+## Scope
+
+SkyForge is:
+
+- A development architecture
+- A technical R&D framework
+- A structured environment for building interactive tools
+- A long-term experimentation platform
+
+It is not:
+
+- A replacement for native Houdini workflows
+- A monolithic production pipeline
+- A feature-driven tool pack
+
+It is a foundation for controlled, high-level tool engineering inside Houdini.
+
+---
+
+## Current Phase
+
+Architecture stabilization and refinement:
+
+- Core module consolidation
+- Viewer State framework consistency
+- Modular SOP execution patterns
+- Internal documentation and structural validation
+
+High-level tools will continue to evolve on top of this base.
