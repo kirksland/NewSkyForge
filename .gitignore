@@ -21,3 +21,32 @@ __pycache__/
 *.hipnc~
 *.hiplc~
 *.hip~
+
+# -------------------------------------------------
+# C++ / MSVC build artifacts
+# -------------------------------------------------
+
+# Build folders
+build/
+cpp/**/build/
+
+# Visual Studio
+.vs/
+*.vcxproj.user
+*.suo
+*.user
+
+# MSVC outputs
+*.obj
+*.lib
+*.exp
+*.pdb
+*.ilk
+
+# Auto-generated folders
+x64/
+Debug/
+Release/
+
+# Temporary local build stash
+_local_build/
