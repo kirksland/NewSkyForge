@@ -80,6 +80,29 @@ def list_tools_from_shelf(shelf_name: str):
 
 
 # ---------------------------------------------------------
+# Action label resolver
+# (what we display vs what we store)
+# ---------------------------------------------------------
+def label_for_action_id(action_id: str) -> str:
+    """
+    Returns a nice label for an action_id.
+    Keeps it dumb for HDAs for now; resolves shelf tool labels.
+    """
+    if action_id.startswith("shelf:"):
+        tool_name = action_id.split(":", 1)[1]
+        try:
+            t = hou.shelves.tool(tool_name)
+            if t:
+                return t.label() or t.name()
+        except Exception:
+            pass
+        return tool_name
+
+    # HDA / other ids
+    return action_id
+
+
+# ---------------------------------------------------------
 # Drag & drop list widget (stores action id in UserRole)
 # - emits "changed" when drop occurs so we can refresh right column
 # ---------------------------------------------------------
@@ -116,8 +139,9 @@ class ActionList(QtWidgets.QListWidget):
         if not aid:
             return False
 
-        # NOTE: label = id for now (keeps demo simple)
-        item = QtWidgets.QListWidgetItem(aid)
+        # Display label, store id
+        item = QtWidgets.QListWidgetItem(label_for_action_id(aid))
+        item.setToolTip(aid)
         item.setData(QtCore.Qt.ItemDataRole.UserRole, aid)
 
         row = index
@@ -184,9 +208,10 @@ class PaletteEditorV2(QtWidgets.QDialog):
         cols = QtWidgets.QHBoxLayout()
         cols.setSpacing(10)
 
-        self.left  = self._make_column("Menu Simple (JSON)", "Search menu items…")
-        self.mid   = self._make_column("Skyforge HDAs", "Search HDAs…")
-        self.right = self._make_column("Skyforge Shelf Tools", "Search shelf tools…")
+        # Keep your existing architecture:
+        self.left  = self._make_column("Menu Simple (JSON)", "Search menu items…", show_hint=True)
+        self.mid   = self._make_column("Skyforge HDAs", "Search HDAs…", show_hint=False)
+        self.right = self._make_column("Skyforge Shelf Tools", "Search shelf tools…", show_hint=False)
 
         cols.addWidget(self.left["box"])
         cols.addWidget(self.mid["box"])
@@ -237,7 +262,7 @@ class PaletteEditorV2(QtWidgets.QDialog):
         # Refresh after drop/reorder in left
         self.left["list"].changed.connect(self._refresh_after_menu_change)
 
-    def _make_column(self, title, search_placeholder):
+    def _make_column(self, title, search_placeholder, show_hint: bool):
         box = QtWidgets.QGroupBox(title)
         v = QtWidgets.QVBoxLayout(box)
         v.setContentsMargins(8, 12, 8, 8)
@@ -246,12 +271,13 @@ class PaletteEditorV2(QtWidgets.QDialog):
         search = make_search_line(search_placeholder)
         lst = ActionList()
 
-        hint = QtWidgets.QLabel("Hint: drag/drop. Left: double-click = remove")
-        hint.setStyleSheet("color:#aaa; font-size:12px;")
-
         v.addWidget(search)
         v.addWidget(lst, 1)
-        v.addWidget(hint)
+
+        if show_hint:
+            hint = QtWidgets.QLabel("Hint: drag/drop. Left: double-click = remove")
+            hint.setStyleSheet("color:#aaa; font-size:12px;")
+            v.addWidget(hint)
 
         return {"box": box, "search": search, "list": lst}
 
@@ -267,10 +293,11 @@ class PaletteEditorV2(QtWidgets.QDialog):
         if menu_ids is None:
             menu_ids = self.cfg.get("menu", [])
 
-        # LEFT = menu ids (json)
+        # LEFT = menu ids (json) - display label, store id
         self.left["list"].clear()
         for aid in menu_ids:
-            it = QtWidgets.QListWidgetItem(aid)
+            it = QtWidgets.QListWidgetItem(label_for_action_id(aid))
+            it.setToolTip(aid)
             it.setData(QtCore.Qt.ItemDataRole.UserRole, aid)
             self.left["list"].addItem(it)
 
@@ -278,6 +305,7 @@ class PaletteEditorV2(QtWidgets.QDialog):
         self.mid["list"].clear()
         for aid in SKYFORGE_HDA_IDS:
             it = QtWidgets.QListWidgetItem(aid)
+            it.setToolTip(aid)
             it.setData(QtCore.Qt.ItemDataRole.UserRole, aid)
             self.mid["list"].addItem(it)
 
