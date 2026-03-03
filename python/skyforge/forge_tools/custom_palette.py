@@ -1,15 +1,19 @@
-# Skyforge DEMO - PALETTE EDITOR v2
+# Skyforge - PALETTE EDITOR v2
+# Left  = JSON menu layout (cfg["menu"])
+# Mid   = HDAs list (demo)
+# Right = Shelf Tools from skyforge.shelf (toolshelf name="skyforge_sh")
+#
+# Houdini 21 => PySide6
+# IMPORTANT: do NOT auto-run show() at import time (reload safety)
 
 from PySide6 import QtWidgets, QtCore, QtGui
 import hou, os, json
 
 CFG_PATH = hou.expandString("$HOUDINI_USER_PREF_DIR/skyforge_menu_demo.json")
 
-# ----------------------------
-# Demo: "Skyforge-only HDA list"
-# Replace this with your real scan (sForge manager.scanFolder etc.)
-# For now: fake list, but structured as real IDs.
-# ----------------------------
+# ---------------------------------------------------------
+# Demo HDA list (keep as-is for now)
+# ---------------------------------------------------------
 SKYFORGE_HDA_IDS = [
     "skyforge::stash::1.0",
     "skyforge::retopo_brush::1.0",
@@ -26,13 +30,13 @@ DEFAULT_CFG = {
     ]
 }
 
-# IMPORTANT: ref globale sinon GC
+# IMPORTANT: ref globale sinon GC + singleton
 _SKYFORGE_EDITOR_REF = None
 
 
-# ----------------------------
+# ---------------------------------------------------------
 # IO JSON
-# ----------------------------
+# ---------------------------------------------------------
 def load_cfg():
     if not os.path.exists(CFG_PATH):
         save_cfg(DEFAULT_CFG)
@@ -55,12 +59,33 @@ def save_cfg(cfg):
         print("[PALETTE v2] Failed to write cfg:", e)
 
 
-# ----------------------------
-# Drag & drop list widget
-# Store action id in UserRole
-# ----------------------------
+# ---------------------------------------------------------
+# Shelf tools listing (Skyforge shelf tab)
+# ---------------------------------------------------------
+def list_tools_from_shelf(shelf_name: str):
+    shelves = hou.shelves.shelves()  # dict name -> hou.Shelf
+    sh = shelves.get(shelf_name)
+    if sh is None:
+        print(f"[PALETTE v2] Shelf not found: {shelf_name}")
+        return []
+
+    out = []
+    for t in sh.tools():
+        name = t.name()
+        label = t.label() or name
+        out.append((name, label))
+
+    out.sort(key=lambda x: x[1].lower())
+    return out
+
+
+# ---------------------------------------------------------
+# Drag & drop list widget (stores action id in UserRole)
+# - emits "changed" when drop occurs so we can refresh right column
+# ---------------------------------------------------------
 class ActionList(QtWidgets.QListWidget):
     MIME = "application/x-skyforge-action-id"
+    changed = QtCore.Signal()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -84,8 +109,6 @@ class ActionList(QtWidgets.QListWidget):
         return md
 
     def dropMimeData(self, index, data, action):
-        # If internal move, QListWidget handles it.
-        # If external, we create a new item with same id.
         if not data.hasFormat(self.MIME):
             return False
 
@@ -93,34 +116,25 @@ class ActionList(QtWidgets.QListWidget):
         if not aid:
             return False
 
-        # Prevent duplicates in destination list (optional)
-        # Uncomment if you want menu to not have duplicates:
-        # for i in range(self.count()):
-        #     if self.item(i).data(QtCore.Qt.ItemDataRole.UserRole) == aid:
-        #         return False
-
-        label = aid  # label = id for now (you can map to nicer names later)
-        item = QtWidgets.QListWidgetItem(label)
+        # NOTE: label = id for now (keeps demo simple)
+        item = QtWidgets.QListWidgetItem(aid)
         item.setData(QtCore.Qt.ItemDataRole.UserRole, aid)
 
-        # Insert at drop position
         row = index
         if row < 0 or row > self.count():
             row = self.count()
         self.insertItem(row, item)
+
+        self.changed.emit()
         return True
 
     def supportedDropActions(self):
         return QtCore.Qt.DropAction.MoveAction | QtCore.Qt.DropAction.CopyAction
 
-    def startDrag(self, supportedActions):
-        # Default drag but allow copy between lists if you want later
-        super().startDrag(supportedActions)
 
-
-# ----------------------------
+# ---------------------------------------------------------
 # UI helpers
-# ----------------------------
+# ---------------------------------------------------------
 def make_search_line(placeholder):
     le = QtWidgets.QLineEdit()
     le.setPlaceholderText(placeholder)
@@ -139,9 +153,12 @@ class PaletteEditorV2(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.setWindowTitle("Skyforge Palette — Menu Builder (demo v2)")
+        self.setWindowTitle("Skyforge Palette — Menu Builder (v2)")
         self.setWindowFlags(QtCore.Qt.WindowType.Tool)
         self.setMinimumSize(980, 520)
+
+        # Important: destruction propre quand on ferme
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
 
         self.cfg = load_cfg()
 
@@ -151,7 +168,7 @@ class PaletteEditorV2(QtWidgets.QDialog):
 
         # Header
         header = QtWidgets.QHBoxLayout()
-        title = QtWidgets.QLabel("Menu Builder  ⇐  Drag from Skyforge HDAs")
+        title = QtWidgets.QLabel("Menu Builder  ⇐  Drag from HDAs / Shelf Tools")
         title.setStyleSheet("font-size:16px; font-weight:bold; color:#3498DB;")
         header.addWidget(title)
         header.addStretch(1)
@@ -167,9 +184,9 @@ class PaletteEditorV2(QtWidgets.QDialog):
         cols = QtWidgets.QHBoxLayout()
         cols.setSpacing(10)
 
-        self.left  = self._make_column("Menu Simple", "Search menu items…")
+        self.left  = self._make_column("Menu Simple (JSON)", "Search menu items…")
         self.mid   = self._make_column("Skyforge HDAs", "Search HDAs…")
-        self.right = self._make_column("Right", "Search…")
+        self.right = self._make_column("Skyforge Shelf Tools", "Search shelf tools…")
 
         cols.addWidget(self.left["box"])
         cols.addWidget(self.mid["box"])
@@ -193,7 +210,7 @@ class PaletteEditorV2(QtWidgets.QDialog):
         footer.addWidget(btn_save)
         root.addLayout(footer)
 
-        # Style
+        # Style (UNCHANGED)
         self.setStyleSheet("""
             QDialog { background:#282828; color:white; }
             QLabel { color:white; }
@@ -207,15 +224,18 @@ class PaletteEditorV2(QtWidgets.QDialog):
         """)
 
         # Populate lists
-        self._load_lists()
+        self._load_lists(menu_ids=self.cfg.get("menu", []))
 
         # Search filters
         self.left["search"].textChanged.connect(lambda t: apply_filter(self.left["list"], t))
         self.mid["search"].textChanged.connect(lambda t: apply_filter(self.mid["list"], t))
         self.right["search"].textChanged.connect(lambda t: apply_filter(self.right["list"], t))
 
-        # Demo interaction: double click removes item (left only)
+        # Double click removes item (left only) + refresh right
         self.left["list"].itemDoubleClicked.connect(self._remove_left_item)
+
+        # Refresh after drop/reorder in left
+        self.left["list"].changed.connect(self._refresh_after_menu_change)
 
     def _make_column(self, title, search_placeholder):
         box = QtWidgets.QGroupBox(title)
@@ -235,53 +255,76 @@ class PaletteEditorV2(QtWidgets.QDialog):
 
         return {"box": box, "search": search, "list": lst}
 
-    def _load_lists(self):
-        # LEFT = cfg menu
+    def _current_menu_ids(self):
+        ids = []
+        for i in range(self.left["list"].count()):
+            aid = self.left["list"].item(i).data(QtCore.Qt.ItemDataRole.UserRole)
+            if aid:
+                ids.append(aid)
+        return ids
+
+    def _load_lists(self, menu_ids=None):
+        if menu_ids is None:
+            menu_ids = self.cfg.get("menu", [])
+
+        # LEFT = menu ids (json)
         self.left["list"].clear()
-        for aid in self.cfg.get("menu", []):
+        for aid in menu_ids:
             it = QtWidgets.QListWidgetItem(aid)
             it.setData(QtCore.Qt.ItemDataRole.UserRole, aid)
             self.left["list"].addItem(it)
 
-        # MID = skyforge hdAs (source)
+        # MID = hdAs (demo list)
         self.mid["list"].clear()
         for aid in SKYFORGE_HDA_IDS:
             it = QtWidgets.QListWidgetItem(aid)
             it.setData(QtCore.Qt.ItemDataRole.UserRole, aid)
             self.mid["list"].addItem(it)
 
-        # RIGHT = placeholder (empty)
+        # RIGHT = shelf tools minus those already in menu
         self.right["list"].clear()
-        for aid in ["todo::recent", "todo::favorites", "todo::commands"]:
-            it = QtWidgets.QListWidgetItem(aid)
-            it.setData(QtCore.Qt.ItemDataRole.UserRole, aid)
+        menu_set = set(menu_ids)
+
+        for tool_name, tool_label in list_tools_from_shelf("skyforge_sh"):
+            action_id = f"shelf:{tool_name}"
+            if action_id in menu_set:
+                continue
+
+            it = QtWidgets.QListWidgetItem(tool_label)
+            it.setToolTip(action_id)
+            it.setData(QtCore.Qt.ItemDataRole.UserRole, action_id)
             self.right["list"].addItem(it)
+
+        if self.right["list"].count() == 0:
+            hint = QtWidgets.QListWidgetItem("(All shelf tools are already in the menu)")
+            hint.setFlags(QtCore.Qt.ItemFlag.NoItemFlags)
+            self.right["list"].addItem(hint)
+
+    def _refresh_after_menu_change(self):
+        # keep unsaved edits (read left list) then rebuild right filtering
+        self._load_lists(menu_ids=self._current_menu_ids())
 
     def _remove_left_item(self, item):
         row = self.left["list"].row(item)
         self.left["list"].takeItem(row)
+        self._refresh_after_menu_change()
 
     def _collect_cfg(self):
-        menu_ids = []
-        for i in range(self.left["list"].count()):
-            aid = self.left["list"].item(i).data(QtCore.Qt.ItemDataRole.UserRole)
-            if aid:
-                menu_ids.append(aid)
-        return {"menu": menu_ids}
+        return {"menu": self._current_menu_ids()}
 
     def _save(self):
         cfg = self._collect_cfg()
         save_cfg(cfg)
 
         hou.ui.displayMessage(
-            "Saved!\n\nJSON:\n" + CFG_PATH + "\n\nOuvre le shelf tool du menu simple pour voir le menu.",
+            "Saved!\n\nJSON:\n" + CFG_PATH,
             severity=hou.severityType.Message
         )
         print("[PALETTE v2] saved:", cfg)
 
     def _reset(self):
         self.cfg = json.loads(json.dumps(DEFAULT_CFG))
-        self._load_lists()
+        self._load_lists(menu_ids=self.cfg.get("menu", []))
         hou.ui.displayMessage("Reset (not saved yet).", severity=hou.severityType.Message)
 
     def _print_path(self):
@@ -290,13 +333,28 @@ class PaletteEditorV2(QtWidgets.QDialog):
         hou.ui.displayMessage("JSON path printed in console:\n" + p, severity=hou.severityType.Message)
 
 
+# ---------------------------------------------------------
+# Singleton launcher
+# ---------------------------------------------------------
 def show_palette_editor_v2():
     global _SKYFORGE_EDITOR_REF
+
+    # already open? just raise it
+    try:
+        if _SKYFORGE_EDITOR_REF is not None and _SKYFORGE_EDITOR_REF.isVisible():
+            _SKYFORGE_EDITOR_REF.raise_()
+            _SKYFORGE_EDITOR_REF.activateWindow()
+            return
+    except RuntimeError:
+        _SKYFORGE_EDITOR_REF = None
+
     try:
         parent = hou.ui.mainQtWindow()
     except Exception:
         parent = None
+
     _SKYFORGE_EDITOR_REF = PaletteEditorV2(parent=parent)
     _SKYFORGE_EDITOR_REF.move(QtGui.QCursor.pos())
     _SKYFORGE_EDITOR_REF.show()
-
+    _SKYFORGE_EDITOR_REF.raise_()
+    _SKYFORGE_EDITOR_REF.activateWindow()
