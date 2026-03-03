@@ -1,6 +1,9 @@
+# ------------------------------
+# custom_palette.py
+# ------------------------------
 # Skyforge - PALETTE EDITOR v2
 # Left  = JSON menu layout (cfg["menu"])
-# Mid   = HDAs list (demo)
+# Mid   = Skyforge Tools (toolMenuLocations startswith "skyforge")
 # Right = Shelf Tools from skyforge.shelf (toolshelf name="skyforge_sh")
 #
 # Houdini 21 => PySide6
@@ -11,22 +14,11 @@ import hou, os, json
 
 CFG_PATH = hou.expandString("$HOUDINI_USER_PREF_DIR/skyforge_menu_demo.json")
 
-# ---------------------------------------------------------
-# Demo HDA list (keep as-is for now)
-# ---------------------------------------------------------
-SKYFORGE_HDA_IDS = [
-    "skyforge::stash::1.0",
-    "skyforge::retopo_brush::1.0",
-    "skyforge::edge_loop::1.0",
-    "skyforge::relax::1.0",
-    "skyforge::quick_subdivide::1.0",
-    "skyforge::boolean_magic::0.1",
-]
-
 DEFAULT_CFG = {
     "menu": [
-        "skyforge::edge_loop::1.0",
-        "skyforge::relax::1.0",
+        "shelf:SF_reload_python",
+        # examples:
+        # "tool:justi::sop_forge_edge_loop::1.0",
     ]
 }
 
@@ -50,6 +42,7 @@ def load_cfg():
     except Exception as e:
         print("[PALETTE v2] Failed to read cfg:", e)
         return json.loads(json.dumps(DEFAULT_CFG))
+
 
 def save_cfg(cfg):
     try:
@@ -80,13 +73,28 @@ def list_tools_from_shelf(shelf_name: str):
 
 
 # ---------------------------------------------------------
+# Skyforge tools (menu locations startswith "skyforge")
+# ---------------------------------------------------------
+def list_skyforge_tools_from_locations(prefix="skyforge"):
+    out = []
+    for t in hou.shelves.tools().values():
+        locs = t.toolMenuLocations() or ()
+        if any((loc or "").startswith(prefix) for loc in locs):
+            name = t.name()
+            label = t.label() or name
+            out.append((name, label, t))
+    out.sort(key=lambda x: x[1].lower())
+    return out
+
+
+# ---------------------------------------------------------
 # Action label resolver
 # (what we display vs what we store)
 # ---------------------------------------------------------
 def label_for_action_id(action_id: str) -> str:
     """
     Returns a nice label for an action_id.
-    Keeps it dumb for HDAs for now; resolves shelf tool labels.
+    Resolves shelf/tool labels.
     """
     if action_id.startswith("shelf:"):
         tool_name = action_id.split(":", 1)[1]
@@ -98,7 +106,16 @@ def label_for_action_id(action_id: str) -> str:
             pass
         return tool_name
 
-    # HDA / other ids
+    if action_id.startswith("tool:"):
+        tool_name = action_id.split(":", 1)[1]
+        try:
+            t = hou.shelves.tool(tool_name)
+            if t:
+                return t.label() or t.name()
+        except Exception:
+            pass
+        return tool_name
+
     return action_id
 
 
@@ -165,6 +182,7 @@ def make_search_line(placeholder):
     le.setClearButtonEnabled(True)
     return le
 
+
 def apply_filter(list_widget, text):
     t = (text or "").lower().strip()
     for i in range(list_widget.count()):
@@ -192,7 +210,7 @@ class PaletteEditorV2(QtWidgets.QDialog):
 
         # Header
         header = QtWidgets.QHBoxLayout()
-        title = QtWidgets.QLabel("Menu Builder  ⇐  Drag from HDAs / Shelf Tools")
+        title = QtWidgets.QLabel("Menu Builder  ⇐  Drag from Skyforge Tools / Shelf Tools")
         title.setStyleSheet("font-size:16px; font-weight:bold; color:#3498DB;")
         header.addWidget(title)
         header.addStretch(1)
@@ -208,9 +226,8 @@ class PaletteEditorV2(QtWidgets.QDialog):
         cols = QtWidgets.QHBoxLayout()
         cols.setSpacing(10)
 
-        # Keep your existing architecture:
         self.left  = self._make_column("Menu Simple (JSON)", "Search menu items…", show_hint=True)
-        self.mid   = self._make_column("Skyforge HDAs", "Search HDAs…", show_hint=False)
+        self.mid   = self._make_column("Skyforge Tools", "Search tools…", show_hint=False)
         self.right = self._make_column("Skyforge Shelf Tools", "Search shelf tools…", show_hint=False)
 
         cols.addWidget(self.left["box"])
@@ -235,7 +252,7 @@ class PaletteEditorV2(QtWidgets.QDialog):
         footer.addWidget(btn_save)
         root.addLayout(footer)
 
-        # Style (UNCHANGED)
+        # Style
         self.setStyleSheet("""
             QDialog { background:#282828; color:white; }
             QLabel { color:white; }
@@ -301,12 +318,13 @@ class PaletteEditorV2(QtWidgets.QDialog):
             it.setData(QtCore.Qt.ItemDataRole.UserRole, aid)
             self.left["list"].addItem(it)
 
-        # MID = hdAs (demo list)
+        # MID = Skyforge tools (from toolMenuLocations)
         self.mid["list"].clear()
-        for aid in SKYFORGE_HDA_IDS:
-            it = QtWidgets.QListWidgetItem(aid)
-            it.setToolTip(aid)
-            it.setData(QtCore.Qt.ItemDataRole.UserRole, aid)
+        for tool_name, tool_label, _tool in list_skyforge_tools_from_locations("skyforge"):
+            action_id = f"tool:{tool_name}"
+            it = QtWidgets.QListWidgetItem(tool_label)
+            it.setToolTip(action_id)
+            it.setData(QtCore.Qt.ItemDataRole.UserRole, action_id)
             self.mid["list"].addItem(it)
 
         # RIGHT = shelf tools minus those already in menu
@@ -329,7 +347,6 @@ class PaletteEditorV2(QtWidgets.QDialog):
             self.right["list"].addItem(hint)
 
     def _refresh_after_menu_change(self):
-        # keep unsaved edits (read left list) then rebuild right filtering
         self._load_lists(menu_ids=self._current_menu_ids())
 
     def _remove_left_item(self, item):
@@ -367,7 +384,6 @@ class PaletteEditorV2(QtWidgets.QDialog):
 def show_palette_editor_v2():
     global _SKYFORGE_EDITOR_REF
 
-    # already open? just raise it
     try:
         if _SKYFORGE_EDITOR_REF is not None and _SKYFORGE_EDITOR_REF.isVisible():
             _SKYFORGE_EDITOR_REF.raise_()

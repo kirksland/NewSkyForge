@@ -1,0 +1,346 @@
+# ------------------------------
+# simple_menu_hda.py
+# ------------------------------
+# SkyForge - SIMPLE MENU (HDA + Shelf)
+# Reads JSON { "menu": [ ... ] } written by custom_palette_hda.py
+# Supports:
+#   - shelf:<tool_name>      -> execute shelf tool script
+#   - hda:<node_type_name>   -> create HDA node
+#
+# For SOP HDAs:
+#   - forces a Scene Viewer context for soptoolutils.genericTool()
+#   - injects a selected node explicitly (current node first, display node fallback)
+#
+# Houdini 21 / PySide6
+
+from PySide6 import QtWidgets, QtGui
+import hou
+import os
+import json
+import soptoolutils
+
+CFG_PATH = hou.expandString("$HOUDINI_USER_PREF_DIR/skyforge_menu_hda.json")
+
+
+# ---------------------------------------------------------
+# IO
+# ---------------------------------------------------------
+def load_cfg():
+    if not os.path.exists(CFG_PATH):
+        return {"menu": []}
+
+    try:
+        with open(CFG_PATH, "r", encoding="utf-8") as handle:
+            cfg = json.load(handle)
+        if "menu" not in cfg or not isinstance(cfg["menu"], list):
+            cfg["menu"] = []
+        return cfg
+    except Exception as exc:
+        print("[SkyForge Simple Menu HDA] Failed to read config:", exc)
+        return {"menu": []}
+
+
+# ---------------------------------------------------------
+# Node type helpers
+# ---------------------------------------------------------
+def _iter_node_types():
+    categories = [
+        hou.sopNodeTypeCategory(),
+        hou.objNodeTypeCategory(),
+        hou.vopNodeTypeCategory(),
+        hou.ropNodeTypeCategory(),
+        hou.cop2NodeTypeCategory(),
+        hou.lopNodeTypeCategory(),
+    ]
+
+    for category in categories:
+        for node_type in category.nodeTypes().values():
+            yield category, node_type
+
+
+def _find_node_type(node_type_name):
+    for category, node_type in _iter_node_types():
+        if node_type.name() == node_type_name:
+            return category, node_type
+    return None, None
+
+
+# ---------------------------------------------------------
+# Labels
+# ---------------------------------------------------------
+def _label_for_action_id(action_id):
+    if action_id.startswith("shelf:"):
+        tool_name = action_id.split(":", 1)[1]
+        try:
+            tool = hou.shelves.tool(tool_name)
+            if tool is not None:
+                return tool.label() or tool.name()
+        except Exception:
+            pass
+        return tool_name
+
+    if action_id.startswith("hda:"):
+        node_type_name = action_id.split(":", 1)[1]
+        _category, node_type = _find_node_type(node_type_name)
+        if node_type is not None:
+            return node_type.description() or node_type.name()
+        return node_type_name
+
+    return action_id
+
+
+# ---------------------------------------------------------
+# Pane helpers
+# ---------------------------------------------------------
+def _active_network_editor():
+    try:
+        return hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
+    except Exception:
+        return None
+
+
+def _active_scene_viewer():
+    try:
+        return hou.ui.paneTabOfType(hou.paneTabType.SceneViewer)
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------
+# SOP selection helpers
+# ---------------------------------------------------------
+def _find_current_or_display_sop(container):
+    # Match Houdini's own fallback logic as closely as possible:
+    # current child first, display node second.
+    try:
+        for child in container.children():
+            try:
+                if child.isCurrent():
+                    return child
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    try:
+        return container.displayNode()
+    except Exception:
+        return None
+
+
+def _build_forced_sop_selection():
+    net = _active_network_editor()
+    if net is None:
+        raise RuntimeError("No active Network Editor pane.")
+
+    container = net.pwd()
+    if container is None:
+        raise RuntimeError("No current network in Network Editor.")
+
+    if container.childTypeCategory() != hou.sopNodeTypeCategory():
+        raise RuntimeError(
+            "Current Network Editor is not inside a SOP network.\n"
+            "Dive inside a SOP context, then try again."
+        )
+
+    selectednode = _find_current_or_display_sop(container)
+
+    # This tuple format is exactly what soptoolutils.genericTool(selection=...)
+    # expects on the filter path: (container, selections, selectednode)
+    return container, [], selectednode
+
+
+def _build_scene_tool_kwargs(tool_name):
+    viewer = _active_scene_viewer()
+    if viewer is None:
+        raise RuntimeError("No active Scene Viewer pane.")
+
+    return {
+        "pane": viewer,
+        "toolname": tool_name,
+        "scriptargs": {},
+    }
+
+
+# ---------------------------------------------------------
+# HDA creation
+# ---------------------------------------------------------
+def _create_sop_hda(node_type_name):
+    category, node_type = _find_node_type(node_type_name)
+    if node_type is None:
+        raise RuntimeError("Node type not found: " + node_type_name)
+
+    if category != hou.sopNodeTypeCategory():
+        raise RuntimeError("Requested SOP creation for non-SOP type: " + node_type_name)
+
+    kwargs = _build_scene_tool_kwargs(node_type_name)
+
+    # Force the selection tuple so Houdini connects to:
+    # current SOP if one exists, otherwise display SOP.
+    selection = _build_forced_sop_selection()
+
+    new_node = soptoolutils.genericTool(
+        kwargs,
+        node_type_name,
+        selection=selection,
+    )
+
+    # Safety pass: if genericTool created the node but did not wire it,
+    # force a fallback connection to the selected source.
+    try:
+        _container, _selections, selectednode = selection
+        if (
+            isinstance(new_node, hou.SopNode)
+            and selectednode is not None
+            and len(new_node.inputs()) > 0
+            and new_node.inputs()[0] is None
+        ):
+            new_node.setFirstInput(selectednode)
+            if selectednode.isDisplayFlagSet():
+                new_node.setDisplayFlag(True)
+            if selectednode.isRenderFlagSet():
+                new_node.setRenderFlag(True)
+    except Exception:
+        pass
+
+    return new_node
+
+
+def _create_non_sop_hda(node_type_name):
+    pane = _active_network_editor()
+    if pane is None:
+        raise RuntimeError("No active Network Editor pane.")
+
+    parent = pane.pwd()
+    if parent is None:
+        raise RuntimeError("No current network in Network Editor.")
+
+    try:
+        new_node = parent.createNode(node_type_name)
+    except Exception as exc:
+        raise RuntimeError(
+            "Failed to create node type '{0}' in {1}:\n{2}".format(
+                node_type_name, parent.path(), exc
+            )
+        )
+
+    try:
+        new_node.moveToGoodPosition()
+    except Exception:
+        try:
+            parent.layoutChildren()
+        except Exception:
+            pass
+
+    try:
+        new_node.setSelected(True, clear_all_selected=True)
+    except Exception:
+        pass
+
+    try:
+        pane.setCurrentNode(new_node)
+        pane.homeToSelection()
+    except Exception:
+        pass
+
+    return new_node
+
+
+def _create_hda(node_type_name):
+    category, node_type = _find_node_type(node_type_name)
+    if node_type is None:
+        raise RuntimeError("Node type not found: " + node_type_name)
+
+    if category == hou.sopNodeTypeCategory():
+        return _create_sop_hda(node_type_name)
+
+    return _create_non_sop_hda(node_type_name)
+
+
+# ---------------------------------------------------------
+# Shelf execution
+# ---------------------------------------------------------
+def _exec_shelf_tool(tool_name):
+    tool = hou.shelves.tool(tool_name)
+    if tool is None:
+        raise RuntimeError("Shelf tool not found: " + tool_name)
+
+    script = tool.script()
+    if not script:
+        raise RuntimeError("Shelf tool has no script: " + tool_name)
+
+    # Best effort:
+    # - if a Scene Viewer exists, provide it so toolutils.activePane(scriptargs)
+    #   can treat this like a viewer-launched tool
+    # - otherwise fall back to a minimal kwargs
+    try:
+        kwargs = _build_scene_tool_kwargs(tool_name)
+    except Exception:
+        kwargs = {
+            "toolname": tool_name,
+            "scriptargs": {},
+        }
+
+    namespace = {
+        "hou": hou,
+        "kwargs": kwargs,
+    }
+
+    exec(script, namespace, namespace)
+
+
+# ---------------------------------------------------------
+# Dispatcher
+# ---------------------------------------------------------
+def dispatch(action_id):
+    if action_id.startswith("shelf:"):
+        tool_name = action_id.split(":", 1)[1]
+        _exec_shelf_tool(tool_name)
+        return
+
+    if action_id.startswith("hda:"):
+        node_type_name = action_id.split(":", 1)[1]
+        return _create_hda(node_type_name)
+
+    raise RuntimeError("Unsupported action id: " + action_id)
+
+
+def _safe_dispatch(action_id):
+    try:
+        dispatch(action_id)
+    except Exception as exc:
+        print("[SkyForge Simple Menu HDA] ERROR:", exc)
+        hou.ui.displayMessage(str(exc), severity=hou.severityType.Error)
+
+
+# ---------------------------------------------------------
+# UI
+# ---------------------------------------------------------
+def show():
+    cfg = load_cfg()
+    items = cfg.get("menu", [])
+
+    menu = QtWidgets.QMenu()
+    header = menu.addAction("SkyForge")
+    header.setEnabled(False)
+    menu.addSeparator()
+
+    if not items:
+        menu.addAction("(empty menu, open palette and save)").setEnabled(False)
+    else:
+        for action_id in items:
+            label = _label_for_action_id(action_id)
+            act = menu.addAction(label)
+            act.setToolTip(action_id)
+            act.triggered.connect(
+                lambda checked=False, aid=action_id: _safe_dispatch(aid)
+            )
+
+    menu.setStyleSheet("""
+        QMenu { background:#282828; color:white; border:1px solid #555; padding:6px; font-size:14px; }
+        QMenu::item { padding:6px 24px; }
+        QMenu::item:selected { background:#505050; }
+        QMenu::separator { height:1px; background:#555; margin:6px 10px; }
+    """)
+
+    menu.exec(QtGui.QCursor.pos())

@@ -1,13 +1,18 @@
+# ------------------------------
+# simple_menu.py
+# ------------------------------
 # Skyforge - SIMPLE MENU
 # Reads JSON { "menu": [ ... ] } written by custom_palette.py
 # Supports:
-#   - shelf:<toolname>            -> exec shelf tool script
-#   - <nodeTypeName> (HDA type)   -> create node in /obj (demo)
+#   - shelf:<toolname>   -> exec shelf tool script
+#   - tool:<toolname>    -> create node (mapped) in active network, connected to display-flag node
+#   - <nodeTypeName>     -> (fallback demo) create in /obj
 #
 # Houdini 21 => PySide6
 
 from PySide6 import QtWidgets, QtGui
 import hou, os, json
+import soptoolutils
 
 CFG_PATH = hou.expandString("$HOUDINI_USER_PREF_DIR/skyforge_menu_demo.json")
 
@@ -15,6 +20,16 @@ DEFAULT_CFG = {
     "menu": [
         "shelf:SF_reload_python",
     ]
+}
+
+# ---------------------------------------------------------
+# Tool -> opType mapping (YOU control this)
+# ---------------------------------------------------------
+TOOL_TO_OPTYPE = {
+    "justi::sop_flying_selector::1.0": "justi::sop_flying_selector::1.0",
+    "justi::sop_forge_edge_flow::1.0": "justi::sop_forge_edge_flow::1.0",
+    "justi::sop_forge_edge_loop::1.0": "justi::sop_forge_edge_loop::1.0",
+    "justi::sop_pyd_loop::1.0": "justi::sop_pyd_loop::1.0",
 }
 
 # ----------------------------
@@ -56,8 +71,114 @@ def _label_for_action_id(action_id: str) -> str:
             pass
         return tool_name
 
-    # For HDAs: show nodeTypeName as-is for now
+    if action_id.startswith("tool:"):
+        tool_name = action_id.split(":", 1)[1]
+        try:
+            t = hou.shelves.tool(tool_name)
+            if t:
+                return t.label() or t.name()
+        except Exception:
+            pass
+        return tool_name
+
     return action_id
+
+# ----------------------------
+# Network helpers
+# ----------------------------
+def _active_network_pane():
+    try:
+        return hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
+    except Exception:
+        return None
+
+def _find_display_flag_node(parent: hou.Node):
+    for n in parent.children():
+        try:
+            if n.isDisplayFlagSet():
+                return n
+        except Exception:
+            pass
+    return None
+
+def _spawn_node_attached_to_display(op_type: str):
+    pane = _active_network_pane()
+    if pane is None:
+        raise RuntimeError("No active Network Editor pane.")
+
+    net = pane.pwd()
+    if net is None:
+        raise RuntimeError("No current network (pwd) in Network Editor.")
+
+    src = _find_display_flag_node(net)
+    if src is None:
+        raise RuntimeError(
+            f"No node with Display Flag in: {net.path()}\n"
+            "Go inside the SOP network where your displayed node lives."
+        )
+
+    # ------------------------------------------------------------
+    # Case A: you're already inside a SOP network => src is a SOP node
+    # ------------------------------------------------------------
+    if src.childTypeCategory() == hou.sopNodeTypeCategory():
+        sop_parent = src.parent()
+        sop_src = src
+
+    # ------------------------------------------------------------
+    # Case B: you're at OBJ level => src is an OBJ node (geo, subnet, etc.)
+    # We need the displayed SOP inside that object.
+    # ------------------------------------------------------------
+    elif src.childTypeCategory() == hou.objNodeTypeCategory():
+        try:
+            sop_src = src.displayNode()  # displayed SOP inside the object
+        except Exception:
+            sop_src = None
+
+        if sop_src is None:
+            raise RuntimeError(
+                f"Object has no display SOP: {src.path()}\n"
+                "Dive inside the object and make sure a SOP has the display flag."
+            )
+
+        sop_parent = sop_src.parent()
+
+    else:
+        raise RuntimeError(
+            f"Unsupported context for display node:\n{src.path()}\n"
+            f"Category: {src.childTypeCategory().name()}"
+        )
+
+    # Create SOP node in correct SOP parent
+    try:
+        new = sop_parent.createNode(op_type)
+    except Exception as e:
+        raise RuntimeError(f"Failed to create SOP node type '{op_type}' in {sop_parent.path()}:\n{e}")
+
+    # Connect to displayed SOP
+    try:
+        new.setInput(0, sop_src)
+    except Exception:
+        pass
+
+    # Layout + flags
+    try:
+        new.moveToGoodPosition()
+    except Exception:
+        sop_parent.layoutChildren()
+
+    try:
+        new.setDisplayFlag(True)
+        new.setRenderFlag(True)
+    except Exception:
+        pass
+
+    try:
+        pane.setCurrentNode(new)
+        pane.homeToSelection()
+    except Exception:
+        pass
+
+    return new
 
 # ----------------------------
 # Dispatcher
@@ -70,12 +191,20 @@ def dispatch(action_id: str):
         if not t:
             raise RuntimeError(f"Shelf tool not found: {tool_name}")
         script = t.script()
-        # NOTE: this runs whatever is in the tool; keep tools as thin launchers
         exec(script, {"hou": hou})
         return
 
-    # Assume "HDA node type" otherwise (demo)
-    # You can tighten this later (prefix skyforge::, etc.)
+    if action_id.startswith("tool:"):
+        tool_name = action_id.split(":", 1)[1]
+        op_type = TOOL_TO_OPTYPE.get(tool_name)
+        if not op_type:
+            raise RuntimeError(
+                f"No TOOL_TO_OPTYPE mapping for:\n{tool_name}\n\n"
+                "Add it in simple_menu.py (TOOL_TO_OPTYPE dict)."
+            )
+        return _spawn_node_attached_to_display(op_type)
+
+    # fallback: assume "HDA node type" (demo)
     node_type = action_id
     parent = hou.node("/obj")
     if not parent:
