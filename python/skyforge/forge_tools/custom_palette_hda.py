@@ -14,12 +14,12 @@ DEFAULT_CFG = {
     "menu": [
         "header:SkyForge",
         "shelf:SF_reload_python",
-    ]
+    ],
+    "sources": {
+        "shelf_names": ["skyforge_sh"],
+        "tool_menu_prefixes": ["skyforge"],
+    },
 }
-
-# Configure for your setup
-SHELF_NAMES = ("skyforge_sh",)
-TOOL_MENU_PREFIX = "skyforge"
 
 _SKYFORGE_EDITOR_REF = None
 _EDITOR_OBJECT_NAME = "SkyForgePaletteEditorHDA"
@@ -46,6 +46,7 @@ def load_cfg():
             cfg = json.load(handle)
         if "menu" not in cfg or not isinstance(cfg["menu"], list):
             cfg["menu"] = list(DEFAULT_CFG["menu"])
+        cfg["sources"] = _normalized_sources(cfg.get("sources"))
         return cfg
     except Exception as exc:
         print("[SkyForge Palette HDA] Failed to read config:", exc)
@@ -58,6 +59,25 @@ def save_cfg(cfg):
             json.dump(cfg, handle, indent=2)
     except Exception as exc:
         print("[SkyForge Palette HDA] Failed to write config:", exc)
+
+
+def _normalized_sources(sources):
+    sources = sources or {}
+
+    shelf_names = sources.get("shelf_names")
+    if not isinstance(shelf_names, list):
+        shelf_names = list(DEFAULT_CFG["sources"]["shelf_names"])
+    shelf_names = [str(x).strip() for x in shelf_names if str(x).strip()]
+
+    tool_menu_prefixes = sources.get("tool_menu_prefixes")
+    if not isinstance(tool_menu_prefixes, list):
+        tool_menu_prefixes = list(DEFAULT_CFG["sources"]["tool_menu_prefixes"])
+    tool_menu_prefixes = [str(x).strip() for x in tool_menu_prefixes if str(x).strip()]
+
+    return {
+        "shelf_names": shelf_names,
+        "tool_menu_prefixes": tool_menu_prefixes,
+    }
 
 
 # ---------------------------------------------------------
@@ -153,11 +173,11 @@ def list_package_hdas():
 # ---------------------------------------------------------
 # Shelf tools listing
 # ---------------------------------------------------------
-def _iter_candidate_shelf_tools():
+def _iter_candidate_shelf_tools(shelf_names, tool_menu_prefixes):
     seen = set()
     shelves = hou.shelves.shelves()
 
-    for shelf_name in SHELF_NAMES:
+    for shelf_name in shelf_names:
         shelf = shelves.get(shelf_name)
         if shelf is None:
             continue
@@ -173,7 +193,11 @@ def _iter_candidate_shelf_tools():
             locs = tool.toolMenuLocations() or ()
         except Exception:
             locs = ()
-        if not any((loc or "").startswith(TOOL_MENU_PREFIX) for loc in locs):
+        if not any(
+            (loc or "").startswith(prefix)
+            for loc in locs
+            for prefix in tool_menu_prefixes
+        ):
             continue
         if tool.name() in seen:
             continue
@@ -199,7 +223,8 @@ def _shelf_label_from_source(source):
     return shelf_name
 
 
-def _preferred_tool_menu_path(tool, source=""):
+def _preferred_tool_menu_path(tool, source="", tool_menu_prefixes=None):
+    tool_menu_prefixes = tool_menu_prefixes or []
     try:
         locs = tool.toolMenuLocations() or ()
     except Exception:
@@ -207,7 +232,7 @@ def _preferred_tool_menu_path(tool, source=""):
 
     for loc in locs:
         loc = (loc or "").strip()
-        if loc.startswith(TOOL_MENU_PREFIX):
+        if any(loc.startswith(prefix) for prefix in tool_menu_prefixes):
             return loc
 
     for loc in locs:
@@ -268,7 +293,7 @@ def _extract_hda_type_from_tool_script(tool):
     return node_type_name or None
 
 
-def build_palette_catalog():
+def build_palette_catalog(shelf_names, tool_menu_prefixes):
     # 1) HDAs "du package"
     hda_items = list_package_hdas()
     hda_by_name = {item["name"]: item for item in hda_items}
@@ -283,8 +308,8 @@ def build_palette_catalog():
                 return _safe_label(nt.description(), node_type_name)
         return node_type_name
 
-    for tool, source in _iter_candidate_shelf_tools():
-        menu_path = _preferred_tool_menu_path(tool, source)
+    for tool, source in _iter_candidate_shelf_tools(shelf_names, tool_menu_prefixes):
+        menu_path = _preferred_tool_menu_path(tool, source, tool_menu_prefixes)
         bound_hda = _extract_hda_type_from_tool_script(tool)
 
         if bound_hda:
@@ -552,7 +577,13 @@ class PaletteEditor(QtWidgets.QDialog):
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
 
         self.cfg = load_cfg()
-        self.hda_items, self.tool_items = build_palette_catalog()
+        self.sources = _normalized_sources(self.cfg.get("sources"))
+        self.shelf_names = list(self.sources["shelf_names"])
+        self.tool_menu_prefixes = list(self.sources["tool_menu_prefixes"])
+        self.hda_items, self.tool_items = build_palette_catalog(
+            self.shelf_names,
+            self.tool_menu_prefixes,
+        )
 
         root = QtWidgets.QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 10)
@@ -564,6 +595,28 @@ class PaletteEditor(QtWidgets.QDialog):
         header.addWidget(title)
         header.addStretch(1)
         root.addLayout(header)
+
+        sources_row = QtWidgets.QHBoxLayout()
+        self.sources_label = QtWidgets.QLabel()
+        self.sources_label.setStyleSheet("color:#bbb; font-size:12px;")
+
+        self.sources_button = QtWidgets.QToolButton()
+        self.sources_button.setText("")
+        self.sources_button.setArrowType(QtCore.Qt.ArrowType.DownArrow)
+        self.sources_button.setToolTip("Sources")
+        self.sources_button.setAutoRaise(True)
+        self.sources_button.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+
+        sources_menu = QtWidgets.QMenu(self.sources_button)
+        action_add_shelf = sources_menu.addAction("Add Shelf Tab")
+        action_add_prefix = sources_menu.addAction("Add Tool Prefix")
+        action_add_shelf.triggered.connect(self._add_shelf_source)
+        action_add_prefix.triggered.connect(self._add_prefix_source)
+        self.sources_button.setMenu(sources_menu)
+
+        sources_row.addWidget(self.sources_label, 1)
+        sources_row.addWidget(self.sources_button)
+        root.addLayout(sources_row)
 
         cols = QtWidgets.QHBoxLayout()
         cols.setSpacing(10)
@@ -616,6 +669,7 @@ class PaletteEditor(QtWidgets.QDialog):
         """)
 
         self._load_lists(self.cfg.get("menu", []))
+        self._refresh_sources_label()
 
         self.left["search"].textChanged.connect(lambda text: apply_filter(self.left["list"], text))
         self.mid["search"].textChanged.connect(lambda text: apply_filter(self.mid["list"], text))
@@ -719,7 +773,62 @@ class PaletteEditor(QtWidgets.QDialog):
         return result
 
     def _collect_cfg(self):
-        return {"menu": self._current_menu_ids()}
+        return {
+            "menu": self._current_menu_ids(),
+            "sources": {
+                "shelf_names": list(self.shelf_names),
+                "tool_menu_prefixes": list(self.tool_menu_prefixes),
+            },
+        }
+
+    def _refresh_sources_label(self):
+        shelves = ", ".join(self.shelf_names) if self.shelf_names else "(none)"
+        prefixes = ", ".join(self.tool_menu_prefixes) if self.tool_menu_prefixes else "(none)"
+        self.sources_label.setText(
+            "Sources | Shelves: {0} | Prefixes: {1}".format(shelves, prefixes)
+        )
+
+    def _rebuild_catalog(self):
+        self.hda_items, self.tool_items = build_palette_catalog(
+            self.shelf_names,
+            self.tool_menu_prefixes,
+        )
+        self._load_lists(self._current_menu_ids())
+        self._refresh_sources_label()
+
+    def _add_shelf_source(self):
+        text, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "Add Shelf Tab",
+            "Shelf internal name:"
+        )
+        if not ok:
+            return
+
+        value = (text or "").strip()
+        if not value or value in self.shelf_names:
+            return
+
+        self.shelf_names.append(value)
+        self.shelf_names.sort(key=str.lower)
+        self._rebuild_catalog()
+
+    def _add_prefix_source(self):
+        text, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "Add Tool Prefix",
+            "toolMenuLocations prefix:"
+        )
+        if not ok:
+            return
+
+        value = (text or "").strip()
+        if not value or value in self.tool_menu_prefixes:
+            return
+
+        self.tool_menu_prefixes.append(value)
+        self.tool_menu_prefixes.sort(key=str.lower)
+        self._rebuild_catalog()
 
     def _add_separator(self):
         self._add_action_item(self.left["list"], label_for_action_id("separator"), "separator")
@@ -754,7 +863,15 @@ class PaletteEditor(QtWidgets.QDialog):
 
     def _reset(self):
         self.cfg = json.loads(json.dumps(DEFAULT_CFG))
+        self.sources = _normalized_sources(self.cfg.get("sources"))
+        self.shelf_names = list(self.sources["shelf_names"])
+        self.tool_menu_prefixes = list(self.sources["tool_menu_prefixes"])
+        self.hda_items, self.tool_items = build_palette_catalog(
+            self.shelf_names,
+            self.tool_menu_prefixes,
+        )
         self._load_lists(self.cfg.get("menu", []))
+        self._refresh_sources_label()
         hou.ui.displayMessage("Reset (not saved yet).", severity=hou.severityType.Message)
 
     def _print_path(self):
