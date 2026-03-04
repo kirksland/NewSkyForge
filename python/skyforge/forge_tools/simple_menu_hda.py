@@ -2,10 +2,14 @@
 # simple_menu_hda.py
 # ------------------------------
 # SkyForge - SIMPLE MENU (HDA + Shelf)
+#
 # Reads JSON { "menu": [ ... ] } written by custom_palette_hda.py
+#
 # Supports:
 #   - shelf:<tool_name>      -> execute shelf tool script
 #   - hda:<node_type_name>   -> create HDA node
+#   - separator              -> menu separator
+#   - header:<text>          -> disabled menu label
 #
 # For SOP HDAs:
 #   - forces a Scene Viewer context for soptoolutils.genericTool()
@@ -13,7 +17,7 @@
 #
 # Houdini 21 / PySide6
 
-from PySide6 import QtWidgets, QtGui
+from PySide6 import QtWidgets, QtGui, QtCore
 import hou
 import os
 import json
@@ -69,6 +73,13 @@ def _find_node_type(node_type_name):
 # Labels
 # ---------------------------------------------------------
 def _label_for_action_id(action_id):
+    if action_id == "separator":
+        return ""
+
+    if action_id.startswith("header:"):
+        text = action_id.split(":", 1)[1].strip()
+        return text or "Header"
+
     if action_id.startswith("shelf:"):
         tool_name = action_id.split(":", 1)[1]
         try:
@@ -110,8 +121,6 @@ def _active_scene_viewer():
 # SOP selection helpers
 # ---------------------------------------------------------
 def _find_current_or_display_sop(container):
-    # Match Houdini's own fallback logic as closely as possible:
-    # current child first, display node second.
     try:
         for child in container.children():
             try:
@@ -145,8 +154,8 @@ def _build_forced_sop_selection():
 
     selectednode = _find_current_or_display_sop(container)
 
-    # This tuple format is exactly what soptoolutils.genericTool(selection=...)
-    # expects on the filter path: (container, selections, selectednode)
+    # Format expected by soptoolutils.genericTool(selection=...)
+    # => (container, selections, selectednode)
     return container, [], selectednode
 
 
@@ -174,9 +183,6 @@ def _create_sop_hda(node_type_name):
         raise RuntimeError("Requested SOP creation for non-SOP type: " + node_type_name)
 
     kwargs = _build_scene_tool_kwargs(node_type_name)
-
-    # Force the selection tuple so Houdini connects to:
-    # current SOP if one exists, otherwise display SOP.
     selection = _build_forced_sop_selection()
 
     new_node = soptoolutils.genericTool(
@@ -185,8 +191,8 @@ def _create_sop_hda(node_type_name):
         selection=selection,
     )
 
-    # Safety pass: if genericTool created the node but did not wire it,
-    # force a fallback connection to the selected source.
+    # Safety pass: if the node was created but left unconnected, force
+    # input 0 to the same source node used to build the synthetic selection.
     try:
         _container, _selections, selectednode = selection
         if (
@@ -270,9 +276,8 @@ def _exec_shelf_tool(tool_name):
         raise RuntimeError("Shelf tool has no script: " + tool_name)
 
     # Best effort:
-    # - if a Scene Viewer exists, provide it so toolutils.activePane(scriptargs)
-    #   can treat this like a viewer-launched tool
-    # - otherwise fall back to a minimal kwargs
+    # if we have a Scene Viewer, provide it in kwargs so tools using
+    # toolutils.activePane(kwargs) behave more like a real viewer launch.
     try:
         kwargs = _build_scene_tool_kwargs(tool_name)
     except Exception:
@@ -293,6 +298,12 @@ def _exec_shelf_tool(tool_name):
 # Dispatcher
 # ---------------------------------------------------------
 def dispatch(action_id):
+    if action_id == "separator":
+        return
+
+    if action_id.startswith("header:"):
+        return
+
     if action_id.startswith("shelf:"):
         tool_name = action_id.split(":", 1)[1]
         _exec_shelf_tool(tool_name)
@@ -313,6 +324,37 @@ def _safe_dispatch(action_id):
         hou.ui.displayMessage(str(exc), severity=hou.severityType.Error)
 
 
+def _make_header_widget(text):
+    container = QtWidgets.QWidget()
+    container.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
+    container.setStyleSheet("background: transparent;")
+
+    layout = QtWidgets.QHBoxLayout(container)
+    layout.setContentsMargins(12, 6, 12, 4)
+    layout.setSpacing(8)
+
+    label = QtWidgets.QLabel(text.upper())
+    label.setAlignment(QtCore.Qt.AlignmentFlag.AlignVCenter | QtCore.Qt.AlignmentFlag.AlignLeft)
+    label.setStyleSheet("""
+        QLabel {
+            color: #bda97a;
+            background: transparent;
+            font-size: 10px;
+            font-weight: 600;
+            padding: 0;
+        }
+    """)
+
+    line = QtWidgets.QFrame()
+    line.setFrameShape(QtWidgets.QFrame.Shape.HLine)
+    line.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
+    line.setStyleSheet("color: #4a4a4a; background: transparent;")
+
+    layout.addWidget(label, 0)
+    layout.addWidget(line, 1)
+    return container
+
+
 # ---------------------------------------------------------
 # UI
 # ---------------------------------------------------------
@@ -329,6 +371,18 @@ def show():
         menu.addAction("(empty menu, open palette and save)").setEnabled(False)
     else:
         for action_id in items:
+            if action_id == "separator":
+                menu.addSeparator()
+                continue
+
+            if action_id.startswith("header:"):
+                title = _label_for_action_id(action_id)
+                act = QtWidgets.QWidgetAction(menu)
+                act.setDefaultWidget(_make_header_widget(title))
+                act.setEnabled(False)
+                menu.addAction(act)
+                continue
+
             label = _label_for_action_id(action_id)
             act = menu.addAction(label)
             act.setToolTip(action_id)
@@ -340,6 +394,7 @@ def show():
         QMenu { background:#282828; color:white; border:1px solid #555; padding:6px; font-size:14px; }
         QMenu::item { padding:6px 24px; }
         QMenu::item:selected { background:#505050; }
+        QMenu::item:disabled { color:#8a8a8a; background:transparent; }
         QMenu::separator { height:1px; background:#555; margin:6px 10px; }
     """)
 
