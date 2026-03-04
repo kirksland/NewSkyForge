@@ -181,7 +181,25 @@ def _iter_candidate_shelf_tools():
         yield tool, "tool_menu:" + ", ".join(locs)
 
 
-def _preferred_tool_menu_path(tool):
+def _shelf_label_from_source(source):
+    if not source or not source.startswith("shelf:"):
+        return ""
+
+    shelf_name = source.split(":", 1)[1].strip()
+    if not shelf_name:
+        return ""
+
+    try:
+        shelf = hou.shelves.shelves().get(shelf_name)
+        if shelf is not None:
+            return _safe_label(shelf.label(), shelf_name)
+    except Exception:
+        pass
+
+    return shelf_name
+
+
+def _preferred_tool_menu_path(tool, source=""):
     try:
         locs = tool.toolMenuLocations() or ()
     except Exception:
@@ -196,6 +214,10 @@ def _preferred_tool_menu_path(tool):
         loc = (loc or "").strip()
         if loc:
             return loc
+
+    shelf_label = _shelf_label_from_source(source)
+    if shelf_label:
+        return shelf_label
 
     return "uncategorized"
 
@@ -262,7 +284,7 @@ def build_palette_catalog():
         return node_type_name
 
     for tool, source in _iter_candidate_shelf_tools():
-        menu_path = _preferred_tool_menu_path(tool)
+        menu_path = _preferred_tool_menu_path(tool, source)
         bound_hda = _extract_hda_type_from_tool_script(tool)
 
         if bound_hda:
