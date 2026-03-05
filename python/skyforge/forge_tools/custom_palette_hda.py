@@ -403,6 +403,7 @@ class ActionList(QtWidgets.QListWidget):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        self._drop_row = -1
         self.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
@@ -427,13 +428,17 @@ class ActionList(QtWidgets.QListWidget):
         if md.hasFormat(self.MIME) or event.source() is self:
             event.acceptProposedAction()
             return
+        self._set_drop_row(-1)
         event.ignore()
 
     def dragMoveEvent(self, event):
         md = event.mimeData()
         if md.hasFormat(self.MIME) or event.source() is self:
+            pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+            self._set_drop_row(self._drop_row_from_pos(pos))
             event.acceptProposedAction()
             return
+        self._set_drop_row(-1)
         event.ignore()
 
     def dropEvent(self, event):
@@ -442,6 +447,7 @@ class ActionList(QtWidgets.QListWidget):
         # 1) internal reorder
         if event.source() is self and not md.hasFormat(self.MIME):
             super().dropEvent(event)
+            self._set_drop_row(-1)
             self.changed.emit()
             return
 
@@ -465,13 +471,61 @@ class ActionList(QtWidgets.QListWidget):
             self.insertItem(row, item)
 
             event.acceptProposedAction()
+            self._set_drop_row(-1)
             self.changed.emit()
             return
 
+        self._set_drop_row(-1)
         event.ignore()
 
     def supportedDropActions(self):
         return QtCore.Qt.DropAction.MoveAction | QtCore.Qt.DropAction.CopyAction
+
+    def dragLeaveEvent(self, event):
+        self._set_drop_row(-1)
+        super().dragLeaveEvent(event)
+
+    def _drop_row_from_pos(self, pos):
+        index = self.indexAt(pos)
+        if not index.isValid():
+            return self.count()
+
+        row = index.row()
+        rect = self.visualRect(index)
+        if pos.y() > rect.center().y():
+            row += 1
+        return max(0, min(row, self.count()))
+
+    def _set_drop_row(self, row):
+        if row == self._drop_row:
+            return
+        self._drop_row = row
+        self.viewport().update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+
+        if self._drop_row < 0:
+            return
+
+        painter = QtGui.QPainter(self.viewport())
+        pen = QtGui.QPen(QtGui.QColor("#4da3ff"))
+        pen.setWidth(2)
+        painter.setPen(pen)
+
+        left = 6
+        right = max(left + 1, self.viewport().width() - 6)
+
+        if self.count() == 0:
+            y = 8
+        elif self._drop_row >= self.count():
+            last_rect = self.visualItemRect(self.item(self.count() - 1))
+            y = last_rect.bottom() + 1
+        else:
+            rect = self.visualItemRect(self.item(self._drop_row))
+            y = rect.top() - 1
+
+        painter.drawLine(left, y, right, y)
 
 
 class ActionTree(QtWidgets.QTreeWidget):
