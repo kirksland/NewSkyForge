@@ -198,7 +198,7 @@ class State(object):
             return False
 
         self.start_he = he
-        print("[SkyForge] start_he =", self.start_he, "edge", p0, p1)
+        #print("[SkyForge] start_he =", self.start_he, "edge", p0, p1)
         return False
 
     def onStopSelection(self, kwargs):

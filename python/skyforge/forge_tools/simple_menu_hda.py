@@ -76,6 +76,13 @@ def _label_for_action_id(action_id):
     if action_id == "separator":
         return ""
 
+    if action_id == "submenu_end":
+        return ""
+
+    if action_id.startswith("submenu_start:"):
+        text = action_id.split(":", 1)[1].strip()
+        return text or "Group"
+
     if action_id.startswith("header:"):
         text = action_id.split(":", 1)[1].strip()
         return text or "Header"
@@ -301,6 +308,12 @@ def dispatch(action_id):
     if action_id == "separator":
         return
 
+    if action_id == "submenu_end":
+        return
+
+    if action_id.startswith("submenu_start:"):
+        return
+
     if action_id.startswith("header:"):
         return
 
@@ -370,21 +383,36 @@ def show():
     if not items:
         menu.addAction("(empty menu, open palette and save)").setEnabled(False)
     else:
+        menu_stack = [menu]
+
         for action_id in items:
+            current_menu = menu_stack[-1]
+
             if action_id == "separator":
-                menu.addSeparator()
+                current_menu.addSeparator()
+                continue
+
+            if action_id == "submenu_end":
+                if len(menu_stack) > 1:
+                    menu_stack.pop()
+                continue
+
+            if action_id.startswith("submenu_start:"):
+                title = _label_for_action_id(action_id)
+                submenu = current_menu.addMenu(title)
+                menu_stack.append(submenu)
                 continue
 
             if action_id.startswith("header:"):
                 title = _label_for_action_id(action_id)
-                act = QtWidgets.QWidgetAction(menu)
+                act = QtWidgets.QWidgetAction(current_menu)
                 act.setDefaultWidget(_make_header_widget(title))
                 act.setEnabled(False)
-                menu.addAction(act)
+                current_menu.addAction(act)
                 continue
 
             label = _label_for_action_id(action_id)
-            act = menu.addAction(label)
+            act = current_menu.addAction(label)
             act.setToolTip(action_id)
             act.triggered.connect(
                 lambda checked=False, aid=action_id: _safe_dispatch(aid)

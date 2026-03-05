@@ -362,6 +362,13 @@ def label_for_action_id(action_id):
     if action_id == "separator":
         return "----------"
 
+    if action_id == "submenu_end":
+        return "[ End Submenu ]"
+
+    if action_id.startswith("submenu_start:"):
+        text = action_id.split(":", 1)[1].strip()
+        return "[ Submenu: " + (text or "Group") + " > ]"
+
     if action_id.startswith("header:"):
         text = action_id.split(":", 1)[1].strip()
         return "[ " + (text or "Header") + " ]"
@@ -632,20 +639,30 @@ class PaletteEditor(QtWidgets.QDialog):
 
         footer = QtWidgets.QHBoxLayout()
 
-        btn_add_sep = QtWidgets.QPushButton("Add Separator")
-        btn_add_header = QtWidgets.QPushButton("Add Header")
+        insert_button = QtWidgets.QToolButton()
+        insert_button.setText("Insert")
+        insert_button.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        insert_menu = QtWidgets.QMenu(insert_button)
+        action_add_sep = insert_menu.addAction("Add Separator")
+        action_add_header = insert_menu.addAction("Add Header")
+        insert_menu.addSeparator()
+        action_add_submenu = insert_menu.addAction("Add Submenu Start")
+        action_add_submenu_end = insert_menu.addAction("Add Submenu End")
+        action_add_sep.triggered.connect(self._add_separator)
+        action_add_header.triggered.connect(self._add_header)
+        action_add_submenu.triggered.connect(self._add_submenu_start)
+        action_add_submenu_end.triggered.connect(self._add_submenu_end)
+        insert_button.setMenu(insert_menu)
+
         btn_print = QtWidgets.QPushButton("Print JSON path")
         btn_reset = QtWidgets.QPushButton("Reset")
         btn_save = QtWidgets.QPushButton("Save")
 
-        btn_add_sep.clicked.connect(self._add_separator)
-        btn_add_header.clicked.connect(self._add_header)
         btn_print.clicked.connect(self._print_path)
         btn_reset.clicked.connect(self._reset)
         btn_save.clicked.connect(self._save)
 
-        footer.addWidget(btn_add_sep)
-        footer.addWidget(btn_add_header)
+        footer.addWidget(insert_button)
         footer.addStretch(1)
         footer.addWidget(btn_print)
         footer.addWidget(btn_reset)
@@ -675,6 +692,7 @@ class PaletteEditor(QtWidgets.QDialog):
         self.mid["search"].textChanged.connect(lambda text: apply_filter(self.mid["list"], text))
         self.right["search"].textChanged.connect(lambda text: apply_filter(self.right["list"], text))
 
+        self.left["list"].changed.connect(self._refresh_menu_visuals)
         self.left["list"].itemDoubleClicked.connect(self._remove_left_item)
 
     def _make_column(self, title, search_placeholder):
@@ -716,6 +734,7 @@ class PaletteEditor(QtWidgets.QDialog):
         self.left["list"].clear()
         for action_id in menu_ids:
             self._add_action_item(self.left["list"], label_for_action_id(action_id), action_id)
+        self._refresh_menu_visuals()
 
         # Mid/Right: hierarchical tree (FIXED)
         self._load_hier_tree(self.mid["list"], self.hda_items, "menu_path")
@@ -781,6 +800,71 @@ class PaletteEditor(QtWidgets.QDialog):
             },
         }
 
+    def _refresh_menu_visuals(self):
+        depth = 0
+        normal_bg = QtGui.QColor("#1f1f1f")
+        submenu_bg = QtGui.QColor("#242424")
+        submenu_fg = QtGui.QColor("#c7d6ea")
+        submenu_end_fg = QtGui.QColor("#9fb0c6")
+        header_fg = QtGui.QColor("#d8c79a")
+        muted_fg = QtGui.QColor("#b8b8b8")
+        default_fg = QtGui.QColor("#ffffff")
+
+        for index in range(self.left["list"].count()):
+            item = self.left["list"].item(index)
+            action_id = item.data(QtCore.Qt.ItemDataRole.UserRole) or ""
+            base_label = label_for_action_id(action_id)
+
+            font = item.font()
+            font.setBold(False)
+            item.setFont(font)
+            item.setBackground(normal_bg)
+            item.setForeground(default_fg)
+
+            if action_id == "submenu_end":
+                depth = max(0, depth - 1)
+                indent = "    " * depth
+                item.setText(indent + "[ End Submenu ]")
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
+                item.setBackground(submenu_bg)
+                item.setForeground(submenu_end_fg)
+                continue
+
+            if action_id.startswith("submenu_start:"):
+                indent = "    " * depth
+                label = action_id.split(":", 1)[1].strip() or "Group"
+                item.setText(indent + "[ " + label + " > ]")
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
+                item.setBackground(submenu_bg)
+                item.setForeground(submenu_fg)
+                depth += 1
+                continue
+
+            if action_id.startswith("header:"):
+                indent = "    " * depth
+                item.setText(indent + base_label)
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
+                item.setForeground(header_fg)
+                continue
+
+            if action_id == "separator":
+                indent = "    " * depth
+                item.setText(indent + "----------")
+                item.setForeground(muted_fg)
+                continue
+
+            indent = "    " * depth
+            if depth > 0:
+                item.setText(indent + "- " + base_label)
+            else:
+                item.setText(base_label)
+
     def _refresh_sources_label(self):
         shelves = ", ".join(self.shelf_names) if self.shelf_names else "(none)"
         prefixes = ", ".join(self.tool_menu_prefixes) if self.tool_menu_prefixes else "(none)"
@@ -832,6 +916,7 @@ class PaletteEditor(QtWidgets.QDialog):
 
     def _add_separator(self):
         self._add_action_item(self.left["list"], label_for_action_id("separator"), "separator")
+        self._refresh_menu_visuals()
 
     def _add_header(self):
         text, ok = QtWidgets.QInputDialog.getText(
@@ -848,10 +933,33 @@ class PaletteEditor(QtWidgets.QDialog):
 
         action_id = "header:" + text
         self._add_action_item(self.left["list"], label_for_action_id(action_id), action_id)
+        self._refresh_menu_visuals()
+
+    def _add_submenu_start(self):
+        text, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "Add Submenu",
+            "Submenu label:"
+        )
+        if not ok:
+            return
+
+        text = (text or "").strip()
+        if not text:
+            return
+
+        action_id = "submenu_start:" + text
+        self._add_action_item(self.left["list"], label_for_action_id(action_id), action_id)
+        self._refresh_menu_visuals()
+
+    def _add_submenu_end(self):
+        self._add_action_item(self.left["list"], label_for_action_id("submenu_end"), "submenu_end")
+        self._refresh_menu_visuals()
 
     def _remove_left_item(self, item):
         row = self.left["list"].row(item)
         self.left["list"].takeItem(row)
+        self._refresh_menu_visuals()
 
     def _save(self):
         cfg = self._collect_cfg()
