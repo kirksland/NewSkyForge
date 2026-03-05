@@ -33,7 +33,7 @@ if errorlevel 1 (
 
 copy /Y "%BUILDDIR%\skyforge_core.pyd" "%OUTPYD%"
 if errorlevel 1 (
-  echo COPY FAILED: close Houdini (it locks the .pyd), then re-run.
+  echo COPY FAILED: close Houdini ^(it locks the .pyd^), then re-run.
   popd
   pause
   exit /b 2
