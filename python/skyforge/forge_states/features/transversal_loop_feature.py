@@ -2,6 +2,7 @@ import re
 import hou
 
 from skyforge.forge_states.feature_base import ViewerFeature
+from skyforge.forge_states.style import LINE_WIDTH, COLOR_PREVIEW_YELLOW
 
 
 class TransversalLoopFeature(ViewerFeature):
@@ -177,8 +178,8 @@ class TransversalLoopFeature(ViewerFeature):
             "pyd_loop_modular_transversal_preview",
             params={
                 "style": hou.drawableGeometryLineStyle.Plain,
-                "color1": (1.0, 1.0, 0.0, 1.0),
-                "line_width": 3.0,
+                "color1": COLOR_PREVIEW_YELLOW,
+                "line_width": float(LINE_WIDTH),
             },
         )
         self.preview_drawable.setGeometry(self.preview_geo)

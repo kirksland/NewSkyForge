@@ -8,7 +8,7 @@ class State(object):
     HUD_TEMPLATE = {
         "title": "SkyForge Modular",
         "desc": "edge workflow",
-        "icon": "SOP_polyextrude",
+        "icon": "$SK_ICONS/devtools.svg",
         "rows": [
             {"id": "loop_mode", "label": "Loop Mode", "key": "R / Q / X"},
             {"id": "loop_mode_g", "type": "choicegraph", "count": 2},

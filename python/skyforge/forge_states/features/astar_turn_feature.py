@@ -4,6 +4,11 @@ import time
 import hou
 
 from skyforge.forge_states.feature_base import ViewerFeature
+from skyforge.forge_states.style import (
+    LINE_WIDTH,
+    COLOR_PREVIEW_YELLOW,
+    COLOR_COMMITTED_ORANGE,
+)
 
 
 class AstarTurnFeature(ViewerFeature):
@@ -248,8 +253,8 @@ class AstarTurnFeature(ViewerFeature):
             "pyd_loop_modular_committed",
             params={
                 "style": hou.drawableGeometryLineStyle.Plain,
-                "color1": (1.0, 0.55, 0.0, 1.0),  # orange
-                "line_width": 3.0,
+                "color1": COLOR_COMMITTED_ORANGE,
+                "line_width": float(LINE_WIDTH),
             },
         )
         self.committed_drawable.setGeometry(self.committed_geo)
@@ -262,8 +267,8 @@ class AstarTurnFeature(ViewerFeature):
             "pyd_loop_modular_preview",
             params={
                 "style": hou.drawableGeometryLineStyle.Plain,
-                "color1": (1.0, 1.0, 0.45, 1.0),  # light yellow
-                "line_width": 3.0,
+                "color1": COLOR_PREVIEW_YELLOW,
+                "line_width": float(LINE_WIDTH),
             },
         )
         self.preview_drawable.setGeometry(self.preview_geo)
