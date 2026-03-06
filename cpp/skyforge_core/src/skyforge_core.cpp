@@ -860,6 +860,19 @@ static inline float heur_euclid_dst_to_dst(
     return (float)std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
+static inline float heur_euclid_to_goal_or_twin(
+    const HalfEdgeMeshData& M,
+    const std::vector<float>& P,
+    int cur_he,
+    int goal_he,
+    int goal_twin_he)
+{
+    float h0 = heur_euclid_dst_to_dst(M, P, cur_he, goal_he);
+    if (goal_twin_he < 0 || goal_twin_he == goal_he) return h0;
+    float h1 = heur_euclid_dst_to_dst(M, P, cur_he, goal_twin_he);
+    return (h1 < h0) ? h1 : h0;
+}
+
 // Turn model (continuity at dst):
 // straight = roll(cur)
 // left     = next(cur)
@@ -901,11 +914,11 @@ struct OpenItem
 };
 
 // astar_turn(start_he, goal_he, max_visits=200000, w_step=1.0, w_turn=5.0,
-//            backtrack_pen=1e6, require_quads=1, P=None, both_dir_start=1) -> list[int]
+//            backtrack_pen=1e6, require_quads=1, P=None, both_dir_start=1, both_dir_goal=1) -> list[int]
 static PyObject* HalfEdgeMesh_astar_turn(PyHalfEdgeMesh* self, PyObject* args, PyObject* kwds)
 {
     static const char* kwnames[] = {
-        "start_he","goal_he","max_visits","w_step","w_turn","backtrack_pen","require_quads","P","both_dir_start", NULL
+        "start_he","goal_he","max_visits","w_step","w_turn","backtrack_pen","require_quads","P","both_dir_start","both_dir_goal", NULL
     };
 
     int start_he = -1;
@@ -917,10 +930,11 @@ static PyObject* HalfEdgeMesh_astar_turn(PyHalfEdgeMesh* self, PyObject* args, P
     int require_quads = 1;
     PyObject* P_obj = Py_None;
     int both_dir_start = 1;
+    int both_dir_goal = 1;
 
     if (!PyArg_ParseTupleAndKeywords(
-        args, kwds, "ii|ifffiOi", (char**)kwnames,
-        &start_he, &goal_he, &max_visits, &w_step, &w_turn, &backtrack_pen, &require_quads, &P_obj, &both_dir_start))
+        args, kwds, "ii|ifffiOii", (char**)kwnames,
+        &start_he, &goal_he, &max_visits, &w_step, &w_turn, &backtrack_pen, &require_quads, &P_obj, &both_dir_start, &both_dir_goal))
     {
         return nullptr;
     }
@@ -931,6 +945,13 @@ static PyObject* HalfEdgeMesh_astar_turn(PyHalfEdgeMesh* self, PyObject* args, P
     start_he = clamp_he(self, start_he);
     goal_he = clamp_he(self, goal_he);
     if (start_he < 0 || goal_he < 0) return PyList_New(0);
+    int goal_twin_he = -1;
+    if (both_dir_goal)
+    {
+        int t = M.twin[(size_t)goal_he];
+        if (t >= 0 && t != goal_he)
+            goal_twin_he = t;
+    }
 
     std::vector<float> P;
     if (!parse_positions(P_obj, M.num_points, P))
@@ -947,7 +968,7 @@ static PyObject* HalfEdgeMesh_astar_turn(PyHalfEdgeMesh* self, PyObject* args, P
     dist[s0] = 0.0f;
     parent[s0] = 0;
 
-    float h0 = heur_euclid_dst_to_dst(M, P, start_he, goal_he);
+    float h0 = heur_euclid_to_goal_or_twin(M, P, start_he, goal_he, goal_twin_he);
     open.push({ h0, 0.0f, -1, start_he });
 
     if (both_dir_start)
@@ -959,7 +980,7 @@ static PyObject* HalfEdgeMesh_astar_turn(PyHalfEdgeMesh* self, PyObject* args, P
             dist[s1] = 0.0f;
             parent[s1] = 0;
 
-            float h1 = heur_euclid_dst_to_dst(M, P, start_twin, goal_he);
+            float h1 = heur_euclid_to_goal_or_twin(M, P, start_twin, goal_he, goal_twin_he);
             open.push({ h1, 0.0f, -1, start_twin });
         }
     }
@@ -982,7 +1003,7 @@ static PyObject* HalfEdgeMesh_astar_turn(PyHalfEdgeMesh* self, PyObject* args, P
         // stale heap entry
         if (g_here != it.g) continue;
 
-        if (it.cur == goal_he)
+        if (it.cur == goal_he || (goal_twin_he >= 0 && it.cur == goal_twin_he))
         {
             best_goal_state = sk;
             break;
@@ -1022,7 +1043,7 @@ static PyObject* HalfEdgeMesh_astar_turn(PyHalfEdgeMesh* self, PyObject* args, P
                 dist[nk] = g2;
                 parent[nk] = sk;
 
-                float h = heur_euclid_dst_to_dst(M, P, nh, goal_he);
+                float h = heur_euclid_to_goal_or_twin(M, P, nh, goal_he, goal_twin_he);
                 float f = g2 + h;
                 open.push({ f, g2, it.cur, nh });
             }
@@ -1080,7 +1101,7 @@ static PyMethodDef HalfEdgeMesh_methods[] = {
 
     // pathfinding
     {"astar_turn", (PyCFunction)HalfEdgeMesh_astar_turn, METH_VARARGS | METH_KEYWORDS,
-     "astar_turn(start_he, goal_he, max_visits=200000, w_step=1.0, w_turn=5.0, backtrack_pen=1e6, require_quads=1, P=None, both_dir_start=1)->list[int]"},
+     "astar_turn(start_he, goal_he, max_visits=200000, w_step=1.0, w_turn=5.0, backtrack_pen=1e6, require_quads=1, P=None, both_dir_start=1, both_dir_goal=1)->list[int]"},
 
     {NULL, NULL, 0, NULL}
 };
@@ -1145,7 +1166,7 @@ PyMODINIT_FUNC PyInit_skyforge_core(void)
     }
 
     // Build id to confirm correct binary loaded
-    PyModule_AddStringConstant(m, "BUILD_ID", "HalfEdgeMesh_v7_astar_both_dir_start");
+    PyModule_AddStringConstant(m, "BUILD_ID", "HalfEdgeMesh_v8_astar_both_dir_start_goal");
 
     return m;
 }
