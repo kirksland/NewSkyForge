@@ -5,6 +5,23 @@ from skyforge.forge_states.features import AstarTurnFeature, TransversalLoopFeat
 
 
 class State(object):
+    HUD_TEMPLATE = {
+        "title": "SkyForge Modular Loop",
+        "desc": "viewer state",
+        "icon": "SOP_polyextrude",
+        "rows": [
+            {"id": "active_feature", "label": "Feature"},
+            {"id": "active_feature_g", "type": "choicegraph", "count": 2},
+            {"id": "loop_mode", "label": "Loop Mode", "key": "R / Q / X"},
+            {"id": "loop_mode_g", "type": "choicegraph", "count": 2},
+            {"type": "divider"},
+            {"label": "Activate A* Turn", "key": "Shift + A"},
+            {"label": "Activate Loops", "key": "Shift"},
+            {"label": "A* Pick / Commit", "key": "LMB"},
+            {"label": "Loop from picked edge", "key": "LMB"},
+        ],
+    }
+
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
         self.scene_viewer = kwargs["scene_viewer"]
@@ -23,6 +40,8 @@ class State(object):
     def onEnter(self, kwargs):
         self.ctx.set_node(kwargs["node"])
         self.ctx.ensure_mesh()
+        self._setup_hud()
+        self._update_hud()
         self.active_feature.on_enter(self.ctx, kwargs)
 
     def onExit(self, kwargs):
@@ -74,6 +93,7 @@ class State(object):
 
             self.active_feature_name = target
             self.active_feature.on_enter(self.ctx, kwargs)
+            self._update_hud()
 
             print("[SkyForge] Active modular feature:", self.active_feature_name)
             return True
@@ -81,7 +101,10 @@ class State(object):
         # Feature-local shortcuts
         on_key = getattr(self.active_feature, "on_key_event", None)
         if callable(on_key):
-            return bool(on_key(self.ctx, kwargs))
+            consumed = bool(on_key(self.ctx, kwargs))
+            if consumed:
+                self._update_hud()
+            return consumed
         return False
 
     def onKeyTransitEvent(self, kwargs):
@@ -101,10 +124,37 @@ class State(object):
                 old_feature.on_exit(self.ctx, kwargs)
                 self.active_feature_name = target
                 self.active_feature.on_enter(self.ctx, kwargs)
+                self._update_hud()
                 print("[SkyForge] Active modular feature:", self.active_feature_name)
             return True
 
         return False
+
+    def _setup_hud(self):
+        try:
+            self.scene_viewer.hudInfo(template=self.HUD_TEMPLATE)
+        except Exception:
+            pass
+
+    def _update_hud(self):
+        feature_label = "A* Turn" if self.active_feature_name == "astar_turn" else "Transversal Loop"
+        feature_index = 0 if self.active_feature_name == "astar_turn" else 1
+
+        mode = getattr(self.features.get("transversal_loop"), "mode", "roll")
+        mode_label = "Roll" if mode == "roll" else "Quad"
+        mode_index = 0 if mode == "roll" else 1
+
+        updates = {
+            "active_feature": feature_label,
+            "active_feature_g": feature_index,
+            "loop_mode": mode_label,
+            "loop_mode_g": mode_index,
+        }
+
+        try:
+            self.scene_viewer.hudInfo(hud_values=updates)
+        except Exception:
+            pass
 
 
 def createViewerStateTemplate():

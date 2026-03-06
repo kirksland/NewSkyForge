@@ -156,29 +156,30 @@ class TransversalLoopFeature(ViewerFeature):
             return
 
         geo = hou.Geometry()
-        poly = geo.createPolygon()
-        poly.setIsClosed(False)
-
-        src0 = int(ctx.mesh.src(hedges[0]))
-        pt0 = ctx.geometry.point(src0)
-        if pt0 is None:
-            self._hide_preview(ctx)
-            return
-
-        p = geo.createPoint()
-        p.setPosition(pt0.position())
-        poly.addVertex(p)
-
+        seg_count = 0
         for he in hedges:
+            src = int(ctx.mesh.src(he))
             dst = int(ctx.mesh.dst(he))
+            psrc = ctx.geometry.point(src)
             pt = ctx.geometry.point(dst)
-            if pt is None:
+            if psrc is None or pt is None:
                 continue
-            p = geo.createPoint()
-            p.setPosition(pt.position())
-            poly.addVertex(p)
 
-        if geo.intrinsicValue("pointcount") < 2:
+            # Draw each loop edge as an independent segment to avoid
+            # visual connectors between non-consecutive loop members.
+            poly = geo.createPolygon()
+            poly.setIsClosed(False)
+
+            p0 = geo.createPoint()
+            p0.setPosition(psrc.position())
+            poly.addVertex(p0)
+
+            p1 = geo.createPoint()
+            p1.setPosition(pt.position())
+            poly.addVertex(p1)
+            seg_count += 1
+
+        if seg_count == 0:
             self._hide_preview(ctx)
             return
 
