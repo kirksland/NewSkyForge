@@ -625,6 +625,25 @@ static inline int turn_right_dst(const HalfEdgeMeshData& M, int he)
     return out;
 }
 
+// Unique edge valence at a point (counts unique neighbors from outgoing hedges).
+// In manifold polygon meshes this matches the point valence.
+static inline int point_valence_unique(const HalfEdgeMeshData& M, int p)
+{
+    if (p < 0) return 0;
+    std::unordered_map<int, int> nbrs;
+    nbrs.reserve(16);
+
+    const int nhe = (int)M.src.size();
+    for (int he = 0; he < nhe; ++he)
+    {
+        if (M.src[(size_t)he] != p) continue;
+        int q = M.dst[(size_t)he];
+        if (q < 0) continue;
+        nbrs.emplace(q, 1);
+    }
+    return (int)nbrs.size();
+}
+
 static PyObject* HalfEdgeMesh_edge_loop_quad(PyHalfEdgeMesh* self, PyObject* args)
 {
     int he0;
@@ -651,6 +670,11 @@ static PyObject* HalfEdgeMesh_edge_loop_quad(PyHalfEdgeMesh* self, PyObject* arg
 
                 int deg = face_degree(M, he, 64);
                 if (deg != 4) break;
+
+                // Continue only through regular quad valence.
+                // Stop on extraordinary vertices/boundaries to avoid ambiguity.
+                int vd = point_valence_unique(M, M.dst[(size_t)he]);
+                if (vd != 4) break;
 
                 int opp = face_opposite_quad(M, he);
                 if (opp < 0) break;
@@ -730,6 +754,10 @@ static PyObject* HalfEdgeMesh_edge_loop_roll(PyHalfEdgeMesh* self, PyObject* arg
 
                 int deg = face_degree(M, he, 64);
                 if (deg != 4) break;
+
+                // Continue only through regular quad valence.
+                int vd = point_valence_unique(M, M.dst[(size_t)he]);
+                if (vd != 4) break;
 
                 he = roll_he(M, he);
             }
@@ -1166,7 +1194,7 @@ PyMODINIT_FUNC PyInit_skyforge_core(void)
     }
 
     // Build id to confirm correct binary loaded
-    PyModule_AddStringConstant(m, "BUILD_ID", "HalfEdgeMesh_v8_astar_both_dir_start_goal");
+    PyModule_AddStringConstant(m, "BUILD_ID", "HalfEdgeMesh_v10_loop_only_valence4");
 
     return m;
 }
