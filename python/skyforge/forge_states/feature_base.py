@@ -10,6 +10,9 @@ class ViewerFeature:
     def on_mouse_event(self, ctx, kwargs):
         return False
 
+    def on_key_event(self, ctx, kwargs):
+        return False
+
     def on_selection(self, ctx, kwargs):
         return False
 

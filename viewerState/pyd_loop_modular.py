@@ -14,7 +14,7 @@ class State(object):
             "astar_turn": AstarTurnFeature(),
             "transversal_loop": TransversalLoopFeature(),
         }
-        self.active_feature_name = "astar_turn"
+        self.active_feature_name = "transversal_loop"
 
     @property
     def active_feature(self):
@@ -55,21 +55,56 @@ class State(object):
             return False
 
         key = (dev.keyString() or "").lower()
-        if key not in ("n", "b"):
-            return False
 
-        target = "astar_turn" if key == "b" else "transversal_loop"
-        if target == self.active_feature_name:
+        # Global feature switch:
+        # - Shift+A => astar_turn
+        # - Shift alone => transversal_loop
+        target = None
+        if key == "shift+a":
+            target = "astar_turn"
+        elif key == "shift":
+            target = "transversal_loop"
+
+        if target is not None:
+            if target == self.active_feature_name:
+                return True
+
+            old_feature = self.active_feature
+            old_feature.on_exit(self.ctx, kwargs)
+
+            self.active_feature_name = target
+            self.active_feature.on_enter(self.ctx, kwargs)
+
+            print("[SkyForge] Active modular feature:", self.active_feature_name)
             return True
 
-        old_feature = self.active_feature
-        old_feature.on_exit(self.ctx, kwargs)
+        # Feature-local shortcuts
+        on_key = getattr(self.active_feature, "on_key_event", None)
+        if callable(on_key):
+            return bool(on_key(self.ctx, kwargs))
+        return False
 
-        self.active_feature_name = target
-        self.active_feature.on_enter(self.ctx, kwargs)
+    def onKeyTransitEvent(self, kwargs):
+        ui = kwargs.get("ui_event")
+        if ui is None:
+            return False
 
-        print("[SkyForge] Active modular feature:", self.active_feature_name)
-        return True
+        dev = ui.device()
+        key = (dev.keyString() or "").lower()
+
+        # Momentary behavior:
+        # as soon as Shift or Shift+A is released, go back to loop mode.
+        if dev.isKeyUp() and key in ("shift", "shift+a"):
+            target = "transversal_loop"
+            if self.active_feature_name != target:
+                old_feature = self.active_feature
+                old_feature.on_exit(self.ctx, kwargs)
+                self.active_feature_name = target
+                self.active_feature.on_enter(self.ctx, kwargs)
+                print("[SkyForge] Active modular feature:", self.active_feature_name)
+            return True
+
+        return False
 
 
 def createViewerStateTemplate():

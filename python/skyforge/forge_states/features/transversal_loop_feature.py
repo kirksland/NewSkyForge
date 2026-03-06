@@ -11,9 +11,11 @@ class TransversalLoopFeature(ViewerFeature):
     def __init__(self):
         self.preview_geo = None
         self.preview_drawable = None
+        self.mode = "roll"  # "roll" (transversal) or "quad"
 
     def on_enter(self, ctx, kwargs):
         self._init_preview(ctx)
+        print("[SkyForge] TransversalLoopFeature mode:", self.mode, "(R=roll, Q=quad, X=toggle)")
 
     def on_exit(self, ctx, kwargs):
         self._hide_preview(ctx)
@@ -21,6 +23,30 @@ class TransversalLoopFeature(ViewerFeature):
     def on_draw(self, ctx, kwargs):
         if self.preview_drawable is not None:
             self.preview_drawable.draw(kwargs["draw_handle"])
+
+    def on_key_event(self, ctx, kwargs):
+        ui = kwargs.get("ui_event")
+        if ui is None:
+            return False
+
+        dev = ui.device()
+        if dev.isAutoRepeat():
+            return False
+
+        key = (dev.keyString() or "").lower()
+        if key == "&":
+            self.mode = "roll"
+            print("[SkyForge] Transversal loop mode -> roll")
+            return True
+        if key == "q":
+            self.mode = "quad"
+            print("[SkyForge] Transversal loop mode -> quad")
+            return True
+        if key == "x":
+            self.mode = "quad" if self.mode == "roll" else "roll"
+            print("[SkyForge] Transversal loop mode ->", self.mode)
+            return True
+        return False
 
     def on_selection(self, ctx, kwargs):
         selection = kwargs.get("selection")
@@ -39,7 +65,8 @@ class TransversalLoopFeature(ViewerFeature):
         if he < 0:
             return False
 
-        path = ctx.mesh.edge_loop_roll(he, 10000, 1)
+        self._set_basegroup_from_points(ctx, pair[0], pair[1])
+        path = self._compute_loop(ctx, he)
         if not path:
             self._hide_preview(ctx)
             return False
@@ -50,6 +77,43 @@ class TransversalLoopFeature(ViewerFeature):
             ctx.parm_string.set(ctx.hedges_to_group_string(path))
 
         return False
+
+    def on_mouse_event(self, ctx, kwargs):
+        ui = kwargs.get("ui_event")
+        if ui is None:
+            return False
+
+        if ui.reason() != hou.uiEventReason.Start:
+            return False
+
+        dev = ui.device()
+        if not dev.isLeftButton():
+            return False
+
+        pair = self._hit_edge(ctx, ui)
+        if pair is None:
+            return False
+
+        p0, p1 = pair
+        he = ctx.edge_to_hedge(p0, p1)
+        if he < 0:
+            return True
+
+        self._set_basegroup_from_points(ctx, p0, p1)
+        path = self._compute_loop(ctx, he)
+        if not path:
+            self._hide_preview(ctx)
+            return True
+
+        self._set_preview_path(ctx, path)
+        if ctx.parm_string is not None:
+            ctx.parm_string.set(ctx.hedges_to_group_string(path))
+        return True
+
+    def _compute_loop(self, ctx, he):
+        if self.mode == "quad":
+            return ctx.mesh.edge_loop_quad(he, 10000, 1)
+        return ctx.mesh.edge_loop_roll(he, 10000, 1)
 
     def _first_edgepair_in_selection(self, selstrs):
         # Use the very first edge token found in the selection strings.
@@ -128,3 +192,27 @@ class TransversalLoopFeature(ViewerFeature):
             ctx.scene_viewer.curViewport().draw()
         except Exception:
             pass
+
+    def _hit_edge(self, ctx, ui_event):
+        if ctx.gi is None:
+            return None
+        rpos, rdir = ui_event.ray()
+        if not ctx.gi.intersect(rpos, rdir):
+            return None
+
+        closest_edge = ctx.gi._closest_edge()
+        if closest_edge is None:
+            return None
+
+        pts = closest_edge.points()
+        if len(pts) < 2:
+            return None
+        return pts[0].number(), pts[1].number()
+
+    def _set_basegroup_from_points(self, ctx, p0, p1):
+        if ctx.node is None:
+            return
+        parm = ctx.node.parm("basegroup")
+        if parm is None:
+            return
+        parm.set(f"p{int(p0)}-{int(p1)}")

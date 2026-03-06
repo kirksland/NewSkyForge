@@ -32,6 +32,9 @@ class AstarTurnFeature(ViewerFeature):
         if self.preview_drawable is not None:
             self.preview_drawable.draw(kwargs["draw_handle"])
 
+    def on_key_event(self, ctx, kwargs):
+        return False
+
     def on_selection(self, ctx, kwargs):
         selection = kwargs.get("selection")
         if not selection:
@@ -50,6 +53,7 @@ class AstarTurnFeature(ViewerFeature):
             return False
 
         self.start_he = he
+        self._set_basegroup_from_points(ctx, p[0], p[1])
         self.hover_he = -1
         self._hide_preview(ctx)
         return False
@@ -97,6 +101,7 @@ class AstarTurnFeature(ViewerFeature):
 
         if self.start_he < 0:
             self.start_he = he
+            self._set_basegroup_from_points(ctx, p0, p1)
             self.hover_he = -1
             self._hide_preview(ctx)
             return True
@@ -219,3 +224,11 @@ class AstarTurnFeature(ViewerFeature):
             ctx.scene_viewer.curViewport().draw()
         except Exception:
             pass
+
+    def _set_basegroup_from_points(self, ctx, p0, p1):
+        if ctx.node is None:
+            return
+        parm = ctx.node.parm("basegroup")
+        if parm is None:
+            return
+        parm.set(f"p{int(p0)}-{int(p1)}")
