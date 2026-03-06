@@ -130,7 +130,7 @@ class State(object):
         # LMB => reset basegroup/grstr then set basegroup (start edge)
         if is_lmb:
             self._reset_all()
-            self.loop_feature.set_basegroup_from_edge(self.ctx, p0, p1)
+            self.loop_feature.preview_edge(self.ctx, p0, p1)
             return True
 
         return False

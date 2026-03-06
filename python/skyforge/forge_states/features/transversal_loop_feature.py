@@ -47,7 +47,7 @@ class TransversalLoopFeature(ViewerFeature):
             return True
         return False
 
-    # Public API for orchestrator-driven interactions
+    # Public API used by pyd_loop_modular orchestrator
     def clear_preview(self, ctx):
         self._hide_preview(ctx)
 
@@ -56,6 +56,16 @@ class TransversalLoopFeature(ViewerFeature):
 
     def set_basegroup_from_edge(self, ctx, p0, p1):
         self._set_basegroup_from_points(ctx, p0, p1)
+
+    def preview_edge(self, ctx, p0, p1):
+        he = ctx.edge_to_hedge(p0, p1)
+        if he < 0:
+            self._hide_preview(ctx)
+            return False
+
+        self._set_basegroup_from_points(ctx, p0, p1)
+        self._set_preview_path(ctx, [he])
+        return True
 
     def commit_loop_from_edge(self, ctx, p0, p1):
         he = ctx.edge_to_hedge(p0, p1)
