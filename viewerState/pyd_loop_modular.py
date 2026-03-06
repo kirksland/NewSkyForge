@@ -93,8 +93,8 @@ class State(object):
         key = (dev.keyString() or "").lower()
 
         # Momentary behavior:
-        # as soon as Shift or Shift+A is released, go back to loop mode.
-        if dev.isKeyUp() and key in ("shift", "shift+a"):
+        # return to loop mode when Shift is released.
+        if dev.isKeyUp() and key == "shift":
             target = "transversal_loop"
             if self.active_feature_name != target:
                 old_feature = self.active_feature

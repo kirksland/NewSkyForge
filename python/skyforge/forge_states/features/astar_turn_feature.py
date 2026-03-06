@@ -66,10 +66,10 @@ class AstarTurnFeature(ViewerFeature):
         reason = ui.reason()
         dev = ui.device()
 
-        if reason not in (hou.uiEventReason.Start, hou.uiEventReason.Located):
+        if reason not in (hou.uiEventReason.Start, hou.uiEventReason.Active, hou.uiEventReason.Located):
             return False
 
-        if reason == hou.uiEventReason.Start and not dev.isLeftButton():
+        if reason in (hou.uiEventReason.Start, hou.uiEventReason.Active) and not dev.isLeftButton():
             return False
 
         edge = self._hit_edge(ctx, ui)
@@ -100,11 +100,17 @@ class AstarTurnFeature(ViewerFeature):
             return False
 
         if self.start_he < 0:
-            self.start_he = he
-            self._set_basegroup_from_points(ctx, p0, p1)
-            self.hover_he = -1
-            self._hide_preview(ctx)
-            return True
+            # Try to recover start from current basegroup on demand.
+            start_from_bg = self._start_from_basegroup(ctx)
+            if start_from_bg >= 0:
+                self.start_he = start_from_bg
+            else:
+                # No start yet: first click defines start edge.
+                self.start_he = he
+                self._set_basegroup_from_points(ctx, p0, p1)
+                self.hover_he = -1
+                self._hide_preview(ctx)
+                return True
 
         path = ctx.mesh.astar_turn(self.start_he, he)
         if not path:
@@ -113,7 +119,9 @@ class AstarTurnFeature(ViewerFeature):
         if ctx.parm_string is not None:
             ctx.parm_string.set(ctx.hedges_to_group_string(path))
 
-        self.start_he = -1
+        # Chain behavior: clicked edge becomes next start.
+        self.start_he = he
+        self._set_basegroup_from_points(ctx, p0, p1)
         self.hover_he = -1
         self._hide_preview(ctx)
         return True
@@ -224,6 +232,18 @@ class AstarTurnFeature(ViewerFeature):
             ctx.scene_viewer.curViewport().draw()
         except Exception:
             pass
+
+    def _start_from_basegroup(self, ctx):
+        if ctx.node is None:
+            return -1
+        parm = ctx.node.parm("basegroup")
+        if parm is None:
+            return -1
+
+        p0, p1 = self._first_edge_from_group(ctx, parm.eval())
+        if p0 < 0:
+            return -1
+        return ctx.edge_to_hedge(p0, p1)
 
     def _set_basegroup_from_points(self, ctx, p0, p1):
         if ctx.node is None:
