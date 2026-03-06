@@ -5,64 +5,40 @@ from skyforge.forge_states.features import AstarTurnFeature, TransversalLoopFeat
 
 
 class State(object):
-    HUD_TEMPLATE = {
-        "title": "SkyForge Modular Loop",
-        "desc": "viewer state",
-        "icon": "SOP_polyextrude",
-        "rows": [
-            {"id": "active_feature", "label": "Feature"},
-            {"id": "active_feature_g", "type": "choicegraph", "count": 2},
-            {"id": "loop_mode", "label": "Loop Mode", "key": "R / Q / X"},
-            {"id": "loop_mode_g", "type": "choicegraph", "count": 2},
-            {"type": "divider"},
-            {"label": "Activate A* Turn", "key": "Shift + A"},
-            {"label": "Activate Loops", "key": "Shift"},
-            {"label": "A* Pick / Commit", "key": "LMB"},
-            {"label": "Loop from picked edge", "key": "LMB"},
-        ],
-    }
-
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
         self.scene_viewer = kwargs["scene_viewer"]
 
         self.ctx = ViewerContext(self.scene_viewer)
-        self.features = {
-            "astar_turn": AstarTurnFeature(),
-            "transversal_loop": TransversalLoopFeature(),
-        }
-        self.active_feature_name = "transversal_loop"
+        self.astar_feature = AstarTurnFeature()
+        self.loop_feature = TransversalLoopFeature()
 
-    @property
-    def active_feature(self):
-        return self.features[self.active_feature_name]
+        self._shift_a_active = False
 
     def onEnter(self, kwargs):
         self.ctx.set_node(kwargs["node"])
         self.ctx.ensure_mesh()
-        self._setup_hud()
-        self._update_hud()
-        self.active_feature.on_enter(self.ctx, kwargs)
+        self.astar_feature.on_enter(self.ctx, kwargs)
+        self.loop_feature.on_enter(self.ctx, kwargs)
+        self.astar_feature.clear_preview(self.ctx)
 
     def onExit(self, kwargs):
-        self.active_feature.on_exit(self.ctx, kwargs)
-
-    def onMouseEvent(self, kwargs):
-        self.ctx.ensure_mesh()
-        return self.active_feature.on_mouse_event(self.ctx, kwargs)
-
-    def onSelection(self, kwargs):
-        self.ctx.ensure_mesh()
-        return self.active_feature.on_selection(self.ctx, kwargs)
-
-    def onStartSelection(self, kwargs):
-        self.active_feature.on_start_selection(self.ctx, kwargs)
-
-    def onStopSelection(self, kwargs):
-        self.active_feature.on_stop_selection(self.ctx, kwargs)
+        self.astar_feature.on_exit(self.ctx, kwargs)
+        self.loop_feature.on_exit(self.ctx, kwargs)
 
     def onDraw(self, kwargs):
-        self.active_feature.on_draw(self.ctx, kwargs)
+        self.loop_feature.on_draw(self.ctx, kwargs)
+        self.astar_feature.on_draw(self.ctx, kwargs)
+
+    def onStartSelection(self, kwargs):
+        pass
+
+    def onStopSelection(self, kwargs):
+        pass
+
+    def onSelection(self, kwargs):
+        # Keep simple: interactions are mouse-chord driven.
+        return False
 
     def onKeyEvent(self, kwargs):
         ui = kwargs.get("ui_event")
@@ -74,38 +50,12 @@ class State(object):
             return False
 
         key = (dev.keyString() or "").lower()
-
-        # Global feature switch:
-        # - Shift+A => astar_turn
-        # - Shift alone => transversal_loop
-        target = None
-        if key == "shift+a":
-            target = "astar_turn"
-        elif key == "shift":
-            target = "transversal_loop"
-
-        if target is not None:
-            if target == self.active_feature_name:
-                return True
-
-            old_feature = self.active_feature
-            old_feature.on_exit(self.ctx, kwargs)
-
-            self.active_feature_name = target
-            self.active_feature.on_enter(self.ctx, kwargs)
-            self._update_hud()
-
-            print("[SkyForge] Active modular feature:", self.active_feature_name)
+        if key == "shift+a" or (key == "a" and self._is_shift_down(dev)):
+            self._shift_a_active = True
             return True
 
-        # Feature-local shortcuts
-        on_key = getattr(self.active_feature, "on_key_event", None)
-        if callable(on_key):
-            consumed = bool(on_key(self.ctx, kwargs))
-            if consumed:
-                self._update_hud()
-            return consumed
-        return False
+        # Loop mode keys (roll/quad)
+        return bool(self.loop_feature.on_key_event(self.ctx, kwargs))
 
     def onKeyTransitEvent(self, kwargs):
         ui = kwargs.get("ui_event")
@@ -113,48 +63,124 @@ class State(object):
             return False
 
         dev = ui.device()
-        key = (dev.keyString() or "").lower()
+        if not dev.isKeyUp():
+            return False
 
-        # Momentary behavior:
-        # return to loop mode when Shift is released.
-        if dev.isKeyUp() and key == "shift":
-            target = "transversal_loop"
-            if self.active_feature_name != target:
-                old_feature = self.active_feature
-                old_feature.on_exit(self.ctx, kwargs)
-                self.active_feature_name = target
-                self.active_feature.on_enter(self.ctx, kwargs)
-                self._update_hud()
-                print("[SkyForge] Active modular feature:", self.active_feature_name)
+        key = (dev.keyString() or "").lower()
+        if key in ("shift", "a", "shift+a"):
+            self._shift_a_active = False
+            self.astar_feature.clear_preview(self.ctx)
+            return True
+        return False
+
+    def onMouseEvent(self, kwargs):
+        ui = kwargs.get("ui_event")
+        if ui is None:
+            return False
+
+        self.ctx.ensure_mesh()
+        dev = ui.device()
+        reason = ui.reason()
+
+        # SHIFT+A hover => preview A*
+        if reason == hou.uiEventReason.Located:
+            if self._shift_a_active and self._is_shift_down(dev):
+                hit = self._hit_edge(ui)
+                if hit is None:
+                    self.astar_feature.clear_preview(self.ctx)
+                    return False
+                _p0, _p1, he = hit
+                self.astar_feature.preview_from_base_to_he(self.ctx, he)
+                return False
+
+            self.astar_feature.clear_preview(self.ctx)
+            return False
+
+        if reason != hou.uiEventReason.Start:
+            return False
+
+        is_lmb = bool(dev.isLeftButton())
+        is_mmb = bool(dev.isMiddleButton())
+        if not (is_lmb or is_mmb):
+            return False
+
+        hit = self._hit_edge(ui)
+        if hit is None:
+            self._reset_all()
+            return True
+
+        p0, p1, he = hit
+        shift = self._is_shift_down(dev)
+
+        # Shift+A + LMB => commit astar to grstr
+        if is_lmb and shift and self._shift_a_active:
+            committed = self.astar_feature.commit_from_base_to_he(self.ctx, he)
+            return bool(committed)
+
+        # Shift + MMB => loop commit to grstr
+        if is_mmb and shift:
+            return bool(self.loop_feature.commit_loop_from_edge(self.ctx, p0, p1))
+
+        # Shift + LMB => set basegroup + append picked edge to grstr
+        if is_lmb and shift:
+            self.loop_feature.set_basegroup_from_edge(self.ctx, p0, p1)
+            self._append_edge_to_grstr(p0, p1)
+            return True
+
+        # LMB => reset basegroup/grstr then set basegroup (start edge)
+        if is_lmb:
+            self._reset_all()
+            self.loop_feature.set_basegroup_from_edge(self.ctx, p0, p1)
             return True
 
         return False
 
-    def _setup_hud(self):
+    def _hit_edge(self, ui_event):
+        if self.ctx.gi is None:
+            return None
+
+        rpos, rdir = ui_event.ray()
+        if not self.ctx.gi.intersect(rpos, rdir):
+            return None
+
+        closest_edge = self.ctx.gi._closest_edge()
+        if closest_edge is None:
+            return None
+
+        pts = closest_edge.points()
+        if len(pts) < 2:
+            return None
+
+        p0 = pts[0].number()
+        p1 = pts[1].number()
+        he = self.ctx.edge_to_hedge(p0, p1)
+        if he < 0:
+            return None
+        return p0, p1, he
+
+    def _reset_all(self):
+        self.astar_feature.reset_all(self.ctx)
+        self.loop_feature.reset_all(self.ctx)
+        self._shift_a_active = False
+
+    def _append_edge_to_grstr(self, p0, p1):
+        if self.ctx.parm_string is None:
+            return
+
+        token = "p{0}-{1}".format(int(p0), int(p1))
+        cur = self.ctx.parm_string.eval() or ""
+        cur = cur.strip()
+        if not cur:
+            self.ctx.parm_string.set(token)
+        else:
+            self.ctx.parm_string.set(cur + " " + token)
+
+    def _is_shift_down(self, dev):
         try:
-            self.scene_viewer.hudInfo(template=self.HUD_TEMPLATE)
+            return bool(dev.isShiftKey())
         except Exception:
-            pass
-
-    def _update_hud(self):
-        feature_label = "A* Turn" if self.active_feature_name == "astar_turn" else "Transversal Loop"
-        feature_index = 0 if self.active_feature_name == "astar_turn" else 1
-
-        mode = getattr(self.features.get("transversal_loop"), "mode", "roll")
-        mode_label = "Roll" if mode == "roll" else "Quad"
-        mode_index = 0 if mode == "roll" else 1
-
-        updates = {
-            "active_feature": feature_label,
-            "active_feature_g": feature_index,
-            "loop_mode": mode_label,
-            "loop_mode_g": mode_index,
-        }
-
-        try:
-            self.scene_viewer.hudInfo(hud_values=updates)
-        except Exception:
-            pass
+            key = (dev.keyString() or "").lower()
+            return "shift" in key
 
 
 def createViewerStateTemplate():
@@ -165,14 +191,5 @@ def createViewerStateTemplate():
     template = hou.ViewerStateTemplate(state_typename, state_label, state_cat)
     template.bindFactory(State)
     template.bindIcon("$SK_ICONS/devtools.svg")
-
-    template.bindGeometrySelector(
-        "SOP: Select an edge",
-        quick_select=True,
-        name="Modular Edge Selector",
-        use_existing_selection=True,
-        geometry_types=(hou.geometryType.Edges,),
-        allow_other_sops=False,
-    )
 
     return template

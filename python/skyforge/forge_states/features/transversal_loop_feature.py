@@ -1,5 +1,4 @@
 import re
-
 import hou
 
 from skyforge.forge_states.feature_base import ViewerFeature
@@ -34,7 +33,7 @@ class TransversalLoopFeature(ViewerFeature):
             return False
 
         key = (dev.keyString() or "").lower()
-        if key == "&":
+        if key in ("r", "&"):
             self.mode = "roll"
             print("[SkyForge] Transversal loop mode -> roll")
             return True
@@ -48,7 +47,37 @@ class TransversalLoopFeature(ViewerFeature):
             return True
         return False
 
+    # Public API for orchestrator-driven interactions
+    def clear_preview(self, ctx):
+        self._hide_preview(ctx)
+
+    def reset_all(self, ctx):
+        self._reset_session(ctx)
+
+    def set_basegroup_from_edge(self, ctx, p0, p1):
+        self._set_basegroup_from_points(ctx, p0, p1)
+
+    def commit_loop_from_edge(self, ctx, p0, p1):
+        he = ctx.edge_to_hedge(p0, p1)
+        if he < 0:
+            return False
+
+        self._set_basegroup_from_points(ctx, p0, p1)
+        path = self._compute_loop(ctx, he)
+        if not path:
+            self._hide_preview(ctx)
+            return False
+
+        self._set_preview_path(ctx, path)
+        if ctx.parm_string is not None:
+            ctx.parm_string.set(ctx.hedges_to_group_string(path))
+        return True
+
     def on_selection(self, ctx, kwargs):
+        ui = kwargs.get("ui_event")
+        if ui is None or not self._is_shift_down(ui.device()):
+            return False
+
         selection = kwargs.get("selection")
         if not selection:
             return False
@@ -61,21 +90,9 @@ class TransversalLoopFeature(ViewerFeature):
         if pair is None:
             return False
 
-        he = ctx.edge_to_hedge(pair[0], pair[1])
-        if he < 0:
-            return False
-
+        # Selection sync only: set basegroup from first selected edge.
+        # Loop commit is handled by explicit mouse chord (Shift + MMB).
         self._set_basegroup_from_points(ctx, pair[0], pair[1])
-        path = self._compute_loop(ctx, he)
-        if not path:
-            self._hide_preview(ctx)
-            return False
-
-        self._set_preview_path(ctx, path)
-
-        if ctx.parm_string is not None:
-            ctx.parm_string.set(ctx.hedges_to_group_string(path))
-
         return False
 
     def on_mouse_event(self, ctx, kwargs):
@@ -87,19 +104,31 @@ class TransversalLoopFeature(ViewerFeature):
             return False
 
         dev = ui.device()
-        if not dev.isLeftButton():
+        is_lmb = bool(dev.isLeftButton())
+        is_mmb = bool(dev.isMiddleButton())
+        if not (is_lmb or is_mmb):
+            return False
+
+        # Loops are momentary: only act while Shift is held.
+        if not self._is_shift_down(dev):
             return False
 
         pair = self._hit_edge(ctx, ui)
         if pair is None:
-            return False
+            self._reset_session(ctx)
+            return True
 
         p0, p1 = pair
+        self._set_basegroup_from_points(ctx, p0, p1)
+
+        # Shift + LMB => basegroup only
+        if is_lmb:
+            return True
+
+        # Shift + MMB => compute loop and commit grstr
         he = ctx.edge_to_hedge(p0, p1)
         if he < 0:
             return True
-
-        self._set_basegroup_from_points(ctx, p0, p1)
         path = self._compute_loop(ctx, he)
         if not path:
             self._hide_preview(ctx)
@@ -217,3 +246,19 @@ class TransversalLoopFeature(ViewerFeature):
         if parm is None:
             return
         parm.set(f"p{int(p0)}-{int(p1)}")
+
+    def _reset_session(self, ctx):
+        self._hide_preview(ctx)
+        if ctx.node is None:
+            return
+        for parm_name in ("grstr", "basegroup"):
+            parm = ctx.node.parm(parm_name)
+            if parm is not None:
+                parm.set("")
+
+    def _is_shift_down(self, dev):
+        try:
+            return bool(dev.isShiftKey())
+        except Exception:
+            key = (dev.keyString() or "").lower()
+            return "shift" in key
