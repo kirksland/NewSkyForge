@@ -1,7 +1,7 @@
 import hou
 
 from skyforge.forge_states.context import ViewerContext
-from skyforge.forge_states.features import AstarTurnFeature
+from skyforge.forge_states.features import AstarTurnFeature, TransversalLoopFeature
 
 
 class State(object):
@@ -12,6 +12,7 @@ class State(object):
         self.ctx = ViewerContext(self.scene_viewer)
         self.features = {
             "astar_turn": AstarTurnFeature(),
+            "transversal_loop": TransversalLoopFeature(),
         }
         self.active_feature_name = "astar_turn"
 
@@ -43,6 +44,32 @@ class State(object):
 
     def onDraw(self, kwargs):
         self.active_feature.on_draw(self.ctx, kwargs)
+
+    def onKeyEvent(self, kwargs):
+        ui = kwargs.get("ui_event")
+        if ui is None:
+            return False
+
+        dev = ui.device()
+        if dev.isAutoRepeat():
+            return False
+
+        key = (dev.keyString() or "").lower()
+        if key not in ("n", "b"):
+            return False
+
+        target = "astar_turn" if key == "b" else "transversal_loop"
+        if target == self.active_feature_name:
+            return True
+
+        old_feature = self.active_feature
+        old_feature.on_exit(self.ctx, kwargs)
+
+        self.active_feature_name = target
+        self.active_feature.on_enter(self.ctx, kwargs)
+
+        print("[SkyForge] Active modular feature:", self.active_feature_name)
+        return True
 
 
 def createViewerStateTemplate():
