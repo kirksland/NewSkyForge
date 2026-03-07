@@ -1,10 +1,11 @@
 import hou
 
 from skyforge.forge_states.context import ViewerContext
+from skyforge.forge_states.base_state import BaseState
 from skyforge.forge_states.features import AstarTurnFeature, TransversalLoopFeature
 
 
-class State(object):
+class State(BaseState):
     HUD_TEMPLATE = {
         "title": "SkyForge Modular",
         "desc": "edge workflow",
@@ -25,10 +26,14 @@ class State(object):
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
         self.scene_viewer = kwargs["scene_viewer"]
+        self.state_name = kwargs.get("state_name", "pyd_loop_modular")
+        super().__init__(scene_viewer=self.scene_viewer, state_name=self.state_name)
 
         self.ctx = ViewerContext(self.scene_viewer)
         self.astar_feature = AstarTurnFeature()
         self.loop_feature = TransversalLoopFeature()
+        self.register_feature("astar_turn", self.astar_feature)
+        self.register_feature("transversal_loop", self.loop_feature)
 
         self._shift_a_active = False
 
@@ -68,8 +73,8 @@ class State(object):
         if dev.isAutoRepeat():
             return False
 
-        key = (dev.keyString() or "").lower()
-        if key == "shift+a" or (key == "a" and self._is_shift_down(dev)):
+        key = self.key_string(dev)
+        if key == "shift+a" or (key == "a" and self.is_shift_down(dev)):
             self._shift_a_active = True
             self._update_hud()
             return True
@@ -89,7 +94,7 @@ class State(object):
         if not dev.isKeyUp():
             return False
 
-        key = (dev.keyString() or "").lower()
+        key = self.key_string(dev)
         if key in ("shift", "a", "shift+a"):
             self._shift_a_active = False
             self.astar_feature.clear_preview(self.ctx)
@@ -135,7 +140,7 @@ class State(object):
             return True
 
         p0, p1, he = hit
-        shift = self._is_shift_down(dev)
+        shift = self.is_shift_down(dev)
 
         # Shift+A + LMB => commit astar to grstr
         if is_lmb and shift and self._shift_a_active:
@@ -227,11 +232,8 @@ class State(object):
             self.ctx.parm_string.set(cur + " " + token)
 
     def _is_shift_down(self, dev):
-        try:
-            return bool(dev.isShiftKey())
-        except Exception:
-            key = (dev.keyString() or "").lower()
-            return "shift" in key
+        # Compatibility shim for older internal calls.
+        return self.is_shift_down(dev)
 
 
 def createViewerStateTemplate():

@@ -1,10 +1,12 @@
 import hou
 import viewerstate.utils as su
 import skyforge.skyforge_core as core
+from .base_context import BaseContext
 
 
-class ViewerContext:
+class ViewerContext(BaseContext):
     def __init__(self, scene_viewer):
+        super().__init__(scene_viewer, state_name="viewer")
         self.scene_viewer = scene_viewer
         self.node = None
         self.geometry = None
