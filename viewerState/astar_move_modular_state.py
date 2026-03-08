@@ -177,7 +177,7 @@ class State(BaseState):
         return consumed
 
     def _start_move_from_grstr(self, kwargs):
-        ptnums = self._points_from_grstr()
+        ptnums = self._points_from_astar_selection()
         if not ptnums or self.ctx.edit_geo is None:
             return False
 
@@ -195,15 +195,18 @@ class State(BaseState):
 
         return bool(self.move_feature.on_mouse_event(self.ctx, kwargs))
 
-    def _points_from_grstr(self):
-        if self.ctx.parm_string is None:
-            return []
-        try:
-            group_str = self.ctx.parm_string.eval() or ""
-        except Exception:
-            group_str = ""
+    def _points_from_astar_selection(self):
+        # Primary source: committed A* hedges tracked by the feature.
+        hedges = list(getattr(self.astar_feature, "committed_hedges", []) or [])
 
-        hedges = self.ctx.hedges_from_group_string(group_str)
+        # Fallback: parse node grstr if feature cache is empty.
+        if not hedges and self.ctx.parm_string is not None:
+            try:
+                group_str = self.ctx.parm_string.eval() or ""
+            except Exception:
+                group_str = ""
+            hedges = self.ctx.hedges_from_group_string(group_str)
+
         if not hedges:
             return []
 
@@ -247,7 +250,7 @@ class State(BaseState):
 
     def _update_hud(self):
         astar_label = "On" if self._shift_a_active else "Off"
-        npts = len(self._points_from_grstr())
+        npts = len(self._points_from_astar_selection())
         values = {
             "astar_state": astar_label,
             "path_pts": str(int(npts)),
