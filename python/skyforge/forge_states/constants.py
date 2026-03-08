@@ -44,3 +44,11 @@ AUTO_AXIS_TOOL_ORDER = ("MOVE", "CUT")
 # ---------------------------------------------------------------------------
 LOOP_MODE_ROLL = "roll"
 LOOP_MODE_QUAD = "quad"
+
+# ---------------------------------------------------------------------------
+# Path output modes (for loop / astar commits)
+# ---------------------------------------------------------------------------
+OUTPUT_MODE_EDGE = "edge"
+OUTPUT_MODE_POINT = "point"
+OUTPUT_MODE_PRIM = "prim"
+OUTPUT_MODE_ORDER = (OUTPUT_MODE_EDGE, OUTPUT_MODE_POINT, OUTPUT_MODE_PRIM)

@@ -11,6 +11,7 @@ from ..constants import (
     COLOR_COMMITTED_ORANGE,
     PARM_BASEGROUP,
     GROUP_PARM_NAMES,
+    OUTPUT_MODE_EDGE,
 )
 
 
@@ -21,6 +22,7 @@ class AstarTurnFeature(ViewerFeature):
         self.start_he = -1
         self.hover_he = -1
         self.committed_hedges = []
+        self.output_mode = OUTPUT_MODE_EDGE
         self.preview = None
         self.ch_preview = ch.CH_ASTAR_PREVIEW
         self.ch_committed = ch.CH_ASTAR_COMMITTED
@@ -69,6 +71,16 @@ class AstarTurnFeature(ViewerFeature):
     def reset_all(self, ctx):
         self._reset_session(ctx)
 
+    def set_output_mode(self, mode):
+        self.output_mode = (mode or OUTPUT_MODE_EDGE).lower().strip()
+
+    def preview_single_edge(self, ctx, he):
+        if he < 0:
+            self._hide_preview(ctx)
+            return False
+        self._set_preview_path(ctx, [int(he)])
+        return True
+
     def preview_from_base_to_he(self, ctx, end_he):
         start_he = self._start_from_basegroup(ctx)
         if start_he < 0 or end_he < 0 or start_he == end_he:
@@ -85,8 +97,17 @@ class AstarTurnFeature(ViewerFeature):
 
     def commit_from_base_to_he(self, ctx, end_he):
         start_he = self._start_from_basegroup(ctx)
-        if start_he < 0 or end_he < 0:
+        if end_he < 0:
             return False
+
+        # First click in A* mode: define start edge and show a preview.
+        if start_he < 0:
+            p0 = int(ctx.mesh.src(end_he))
+            p1 = int(ctx.mesh.dst(end_he))
+            self.start_he = int(end_he)
+            self._set_basegroup_from_points(ctx, p0, p1)
+            self.preview_single_edge(ctx, end_he)
+            return True
 
         path = ctx.mesh.astar_turn(start_he, end_he)
         if not path:
@@ -96,7 +117,7 @@ class AstarTurnFeature(ViewerFeature):
         merged = self._merge_path(current, path)
 
         if ctx.parm_string is not None:
-            ctx.parm_string.set(ctx.hedges_to_group_string(merged))
+            ctx.parm_string.set(ctx.hedges_to_group_string_mode(merged, self.output_mode))
 
         self.committed_hedges = list(merged)
         self._set_committed_path(ctx, self.committed_hedges)
@@ -200,7 +221,7 @@ class AstarTurnFeature(ViewerFeature):
         current = self._current_committed_from_parm(ctx)
         self.committed_hedges = self._merge_path(current, path)
         if ctx.parm_string is not None:
-            ctx.parm_string.set(ctx.hedges_to_group_string(self.committed_hedges))
+            ctx.parm_string.set(ctx.hedges_to_group_string_mode(self.committed_hedges, self.output_mode))
 
         # Chain behavior: clicked edge becomes next start.
         self.start_he = he

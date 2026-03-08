@@ -101,6 +101,61 @@ class ToolContext(BaseContext):
             parts.append("p{0}-{1}".format(int(self.mesh.src(he)), int(self.mesh.dst(he))))
         return " ".join(parts)
 
+    def hedges_to_point_group_string(self, hedges):
+        """Encode half-edge ids to Houdini point-group string format."""
+        pts = []
+        seen = set()
+        for he in hedges or []:
+            a = int(self.mesh.src(int(he)))
+            b = int(self.mesh.dst(int(he)))
+            if a not in seen:
+                seen.add(a)
+                pts.append(a)
+            if b not in seen:
+                seen.add(b)
+                pts.append(b)
+        return " ".join(str(p) for p in pts)
+
+    def hedges_to_prim_group_string(self, hedges):
+        """Encode half-edge ids to Houdini primitive-group string format."""
+        prims = []
+        seen = set()
+        for he in hedges or []:
+            h = int(he)
+
+            # New API (preferred): returns both sides of undirected edge.
+            if hasattr(self.mesh, "hedge_prims"):
+                try:
+                    left, right = self.mesh.hedge_prims(h)
+                except Exception:
+                    left, right = -1, -1
+                for pr in (int(left), int(right)):
+                    if pr >= 0 and pr not in seen:
+                        seen.add(pr)
+                        prims.append(pr)
+                continue
+
+            # Backward-compatible fallback.
+            pr = -1
+            if hasattr(self.mesh, "hedge_prim"):
+                try:
+                    pr = int(self.mesh.hedge_prim(h))
+                except Exception:
+                    pr = -1
+            if pr >= 0 and pr not in seen:
+                seen.add(pr)
+                prims.append(pr)
+        return " ".join(str(pr) for pr in prims)
+
+    def hedges_to_group_string_mode(self, hedges, mode):
+        """Encode hedges according to output mode: edge/point/prim."""
+        m = (mode or "").lower().strip()
+        if m == k.OUTPUT_MODE_POINT:
+            return self.hedges_to_point_group_string(hedges)
+        if m == k.OUTPUT_MODE_PRIM:
+            return self.hedges_to_prim_group_string(hedges)
+        return self.hedges_to_group_string(hedges)
+
     def hedges_from_group_string(self, group_str):
         """Decode edge-group string to valid half-edge ids."""
         tokens = re.findall(r"p?\s*(\d+)\s*-\s*p?\s*(\d+)", group_str or "")

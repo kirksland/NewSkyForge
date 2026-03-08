@@ -14,6 +14,8 @@ class State(BaseState):
         "rows": [
             {"id": "loop_mode", "label": "Loop Mode", "key": "R / Q / X"},
             {"id": "loop_mode_g", "type": "choicegraph", "count": 2},
+            {"id": "out_mode", "label": "Output", "key": "1 / 2 / 3"},
+            {"id": "out_mode_g", "type": "choicegraph", "count": 3},
             {"id": "astar_state", "label": "A* Preview", "key": "Shift + A"},
             {"type": "divider"},
             {"label": "Reset + Set Start", "key": "LMB"},
@@ -39,6 +41,7 @@ class State(BaseState):
         self.register_feature("transversal_loop", self.loop_feature)
 
         self._shift_a_active = False
+        self._output_mode = k.OUTPUT_MODE_EDGE
 
     def onEnter(self, kwargs):
         self.ctx.set_node(kwargs["node"])
@@ -48,6 +51,7 @@ class State(BaseState):
         self.astar_feature.on_enter(self.ctx, kwargs)
         self.loop_feature.on_enter(self.ctx, kwargs)
         self.astar_feature.clear_preview(self.ctx)
+        self._apply_output_mode()
         self._setup_hud()
         self._update_hud()
 
@@ -71,6 +75,16 @@ class State(BaseState):
         key = self.key_string(dev)
         if key == "shift+a" or (key == "a" and self.is_shift_down(dev)):
             self._shift_a_active = True
+            self._update_hud()
+            return True
+
+        if key in ("1", "2", "3"):
+            self._output_mode = {
+                "1": k.OUTPUT_MODE_EDGE,
+                "2": k.OUTPUT_MODE_POINT,
+                "3": k.OUTPUT_MODE_PRIM,
+            }[key]
+            self._apply_output_mode()
             self._update_hud()
             return True
 
@@ -176,14 +190,30 @@ class State(BaseState):
         except Exception:
             pass
 
+    def _apply_output_mode(self):
+        self.astar_feature.set_output_mode(self._output_mode)
+        self.loop_feature.set_output_mode(self._output_mode)
+
     def _update_hud(self):
         mode = getattr(self.loop_feature, "mode", k.LOOP_MODE_ROLL)
         mode_label = "Roll" if mode == k.LOOP_MODE_ROLL else "Quad"
         mode_idx = 0 if mode == k.LOOP_MODE_ROLL else 1
+        out_label = {
+            k.OUTPUT_MODE_EDGE: "Edge",
+            k.OUTPUT_MODE_POINT: "Point",
+            k.OUTPUT_MODE_PRIM: "Prim",
+        }.get(self._output_mode, "Edge")
+        out_idx = {
+            k.OUTPUT_MODE_EDGE: 0,
+            k.OUTPUT_MODE_POINT: 1,
+            k.OUTPUT_MODE_PRIM: 2,
+        }.get(self._output_mode, 0)
         astar_label = "On" if self._shift_a_active else "Off"
         values = {
             "loop_mode": mode_label,
             "loop_mode_g": mode_idx,
+            "out_mode": out_label,
+            "out_mode_g": out_idx,
             "astar_state": astar_label,
         }
         try:

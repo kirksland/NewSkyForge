@@ -10,6 +10,7 @@ from ..constants import (
     LOOP_MODE_ROLL,
     LOOP_MODE_QUAD,
     GROUP_PARM_NAMES,
+    OUTPUT_MODE_EDGE,
 )
 
 
@@ -21,6 +22,7 @@ class TransversalLoopFeature(ViewerFeature):
         self.ch_preview = ch.CH_LOOP_PREVIEW
         self.ch_committed = ch.CH_LOOP_COMMITTED
         self.mode = LOOP_MODE_ROLL  # transversal or quad
+        self.output_mode = OUTPUT_MODE_EDGE
 
     def on_enter(self, ctx, kwargs):
         self.preview = ctx.get_service("preview")
@@ -74,6 +76,9 @@ class TransversalLoopFeature(ViewerFeature):
     def reset_all(self, ctx):
         self._reset_session(ctx)
 
+    def set_output_mode(self, mode):
+        self.output_mode = (mode or OUTPUT_MODE_EDGE).lower().strip()
+
     def set_basegroup_from_edge(self, ctx, p0, p1):
         self._set_basegroup_from_points(ctx, p0, p1)
 
@@ -100,7 +105,7 @@ class TransversalLoopFeature(ViewerFeature):
 
         self._set_committed_path(ctx, path)
         if ctx.parm_string is not None:
-            ctx.parm_string.set(ctx.hedges_to_group_string(path))
+            ctx.parm_string.set(ctx.hedges_to_group_string_mode(path, self.output_mode))
         return True
 
     def on_selection(self, ctx, kwargs):
@@ -166,7 +171,7 @@ class TransversalLoopFeature(ViewerFeature):
 
         self._set_committed_path(ctx, path)
         if ctx.parm_string is not None:
-            ctx.parm_string.set(ctx.hedges_to_group_string(path))
+            ctx.parm_string.set(ctx.hedges_to_group_string_mode(path, self.output_mode))
         return True
 
     def _compute_loop(self, ctx, he):
