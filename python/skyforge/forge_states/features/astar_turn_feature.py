@@ -18,17 +18,26 @@ class AstarTurnFeature(ViewerFeature):
         self.start_he = -1
         self.hover_he = -1
         self.committed_hedges = []
-        self.preview_geo = None
-        self.preview_drawable = None
-        self.committed_geo = None
-        self.committed_drawable = None
+        self.preview = None
+        self.ch_preview = "astar_preview"
+        self.ch_committed = "astar_committed"
         self._last_commit_edge = -1
         self._last_commit_t = 0.0
 
     def on_enter(self, ctx, kwargs):
         self.start_he = -1
         self.hover_he = -1
-        self._init_drawables(ctx)
+        self.preview = ctx.get_service("preview")
+        self.preview.ensure_line_channel(
+            self.ch_committed,
+            COLOR_COMMITTED_ORANGE,
+            line_width=float(LINE_WIDTH),
+        )
+        self.preview.ensure_line_channel(
+            self.ch_preview,
+            COLOR_PREVIEW_YELLOW,
+            line_width=float(LINE_WIDTH),
+        )
         self.committed_hedges = self._hedges_from_group_string(ctx, (ctx.parm_string.eval() if ctx.parm_string is not None else ""))
         if self.committed_hedges:
             self.start_he = self.committed_hedges[-1]
@@ -45,10 +54,7 @@ class AstarTurnFeature(ViewerFeature):
         self._hide_committed(ctx)
 
     def on_draw(self, ctx, kwargs):
-        if self.committed_drawable is not None:
-            self.committed_drawable.draw(kwargs["draw_handle"])
-        if self.preview_drawable is not None:
-            self.preview_drawable.draw(kwargs["draw_handle"])
+        return
 
     def on_key_event(self, ctx, kwargs):
         return False
@@ -202,38 +208,13 @@ class AstarTurnFeature(ViewerFeature):
         return True
 
     def _hit_edge(self, ctx, ui_event):
-        rpos, rdir = ui_event.ray()
-        if not ctx.gi.intersect(rpos, rdir):
+        hit = ctx.hit_edge(ui_event)
+        if hit is None:
             return None
-
-        closest_edge = ctx.gi._closest_edge()
-        if closest_edge is None:
-            return None
-
-        pts = closest_edge.points()
-        if len(pts) < 2:
-            return None
-
-        return pts[0].number(), pts[1].number()
+        return int(hit[0]), int(hit[1])
 
     def _first_edge_from_group(self, ctx, group_str):
-        if not group_str or ctx.geometry is None:
-            return -1, -1
-
-        try:
-            edges = ctx.geometry.globEdges(group_str)
-        except Exception:
-            edges = ()
-
-        if edges:
-            pts = edges[0].points()
-            if len(pts) >= 2:
-                return int(pts[0].number()), int(pts[1].number())
-
-        m = re.search(r"p?(\d+)\s*-\s*p?(\d+)", group_str)
-        if m:
-            return int(m.group(1)), int(m.group(2))
-        return -1, -1
+        return ctx.first_edge_from_group_string(group_str)
 
     def _edgepair_from_selstr(self, selstr):
         m = re.search(r"p(\d+)-(\d+)", selstr or "")
@@ -245,39 +226,9 @@ class AstarTurnFeature(ViewerFeature):
             return int(nums[0]), int(nums[1])
         return None
 
-    def _init_drawables(self, ctx):
-        self.committed_geo = hou.Geometry()
-        self.committed_drawable = hou.GeometryDrawable(
-            ctx.scene_viewer,
-            hou.drawableGeometryType.Line,
-            "pyd_loop_modular_committed",
-            params={
-                "style": hou.drawableGeometryLineStyle.Plain,
-                "color1": COLOR_COMMITTED_ORANGE,
-                "line_width": float(LINE_WIDTH),
-            },
-        )
-        self.committed_drawable.setGeometry(self.committed_geo)
-        self.committed_drawable.show(False)
-
-        self.preview_geo = hou.Geometry()
-        self.preview_drawable = hou.GeometryDrawable(
-            ctx.scene_viewer,
-            hou.drawableGeometryType.Line,
-            "pyd_loop_modular_preview",
-            params={
-                "style": hou.drawableGeometryLineStyle.Plain,
-                "color1": COLOR_PREVIEW_YELLOW,
-                "line_width": float(LINE_WIDTH),
-            },
-        )
-        self.preview_drawable.setGeometry(self.preview_geo)
-        self.preview_drawable.show(False)
-
     def _hide_preview(self, ctx):
-        if self.preview_drawable is not None:
-            self.preview_drawable.show(False)
-            self._request_draw(ctx)
+        self.preview.hide(self.ch_preview)
+        self._request_draw(ctx)
 
     def _set_preview_path(self, ctx, hedges):
         self._set_path_to_drawable(ctx, hedges, is_committed=False)
@@ -286,60 +237,17 @@ class AstarTurnFeature(ViewerFeature):
         self._set_path_to_drawable(ctx, hedges, is_committed=True)
 
     def _set_path_to_drawable(self, ctx, hedges, is_committed):
+        ch = self.ch_committed if is_committed else self.ch_preview
         if not hedges or ctx.geometry is None:
-            if is_committed:
-                self._hide_committed(ctx)
-            else:
-                self._hide_preview(ctx)
+            self.preview.hide(ch)
+            self._request_draw(ctx)
             return
-
-        geo = hou.Geometry()
-        poly = geo.createPolygon()
-        poly.setIsClosed(False)
-
-        src0 = int(ctx.mesh.src(hedges[0]))
-        pt0 = ctx.geometry.point(src0)
-        if pt0 is None:
-            if is_committed:
-                self._hide_committed(ctx)
-            else:
-                self._hide_preview(ctx)
-            return
-
-        p = geo.createPoint()
-        p.setPosition(pt0.position())
-        poly.addVertex(p)
-
-        for he in hedges:
-            dst = int(ctx.mesh.dst(he))
-            pt = ctx.geometry.point(dst)
-            if pt is None:
-                continue
-            p = geo.createPoint()
-            p.setPosition(pt.position())
-            poly.addVertex(p)
-
-        if geo.intrinsicValue("pointcount") < 2:
-            if is_committed:
-                self._hide_committed(ctx)
-            else:
-                self._hide_preview(ctx)
-            return
-
-        if is_committed:
-            self.committed_geo = geo
-            self.committed_drawable.setGeometry(self.committed_geo)
-            self.committed_drawable.show(True)
-        else:
-            self.preview_geo = geo
-            self.preview_drawable.setGeometry(self.preview_geo)
-            self.preview_drawable.show(True)
+        self.preview.set_line_from_hedges(ch, ctx.geometry, ctx.mesh, hedges, segments=False)
         self._request_draw(ctx)
 
     def _hide_committed(self, ctx):
-        if self.committed_drawable is not None:
-            self.committed_drawable.show(False)
-            self._request_draw(ctx)
+        self.preview.hide(self.ch_committed)
+        self._request_draw(ctx)
 
     def _request_draw(self, ctx):
         try:
@@ -361,13 +269,7 @@ class AstarTurnFeature(ViewerFeature):
         return out
 
     def _hedges_from_group_string(self, ctx, group_str):
-        tokens = re.findall(r"p?\s*(\d+)\s*-\s*p?\s*(\d+)", group_str or "")
-        out = []
-        for a_txt, b_txt in tokens:
-            he = ctx.edge_to_hedge(int(a_txt), int(b_txt))
-            if he >= 0:
-                out.append(he)
-        return out
+        return ctx.hedges_from_group_string(group_str)
 
     def _current_committed_from_parm(self, ctx):
         if ctx.parm_string is None:
@@ -402,12 +304,7 @@ class AstarTurnFeature(ViewerFeature):
         return ctx.edge_to_hedge(p0, p1)
 
     def _set_basegroup_from_points(self, ctx, p0, p1):
-        if ctx.node is None:
-            return
-        parm = ctx.node.parm("basegroup")
-        if parm is None:
-            return
-        parm.set(f"p{int(p0)}-{int(p1)}")
+        ctx.set_basegroup_from_points(p0, p1)
 
     def _reset_session(self, ctx):
         self.start_he = -1
@@ -415,9 +312,4 @@ class AstarTurnFeature(ViewerFeature):
         self.committed_hedges = []
         self._hide_preview(ctx)
         self._hide_committed(ctx)
-        if ctx.node is None:
-            return
-        for parm_name in ("grstr", "basegroup"):
-            parm = ctx.node.parm(parm_name)
-            if parm is not None:
-                parm.set("")
+        ctx.clear_group_parms(("grstr", "basegroup"))

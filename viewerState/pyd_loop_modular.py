@@ -1,8 +1,8 @@
 import hou
 
-from skyforge.forge_states.context import ViewerContext
+from skyforge.forge_states.tool_context import ToolContext
 from skyforge.forge_states.base_state import BaseState
-from skyforge.forge_states.features import AstarTurnFeature, TransversalLoopFeature
+from skyforge.forge_states.features import AstarTurnFeature, TransversalLoopFeature, PreviewFeature
 
 
 class State(BaseState):
@@ -29,9 +29,11 @@ class State(BaseState):
         self.state_name = kwargs.get("state_name", "pyd_loop_modular")
         super().__init__(scene_viewer=self.scene_viewer, state_name=self.state_name)
 
-        self.ctx = ViewerContext(self.scene_viewer)
+        self.ctx = ToolContext(self.scene_viewer, state_name=self.state_name)
+        self.preview_feature = PreviewFeature(prefix="pyd_loop_modular", enable_hover=False)
         self.astar_feature = AstarTurnFeature()
         self.loop_feature = TransversalLoopFeature()
+        self.register_feature("preview", self.preview_feature)
         self.register_feature("astar_turn", self.astar_feature)
         self.register_feature("transversal_loop", self.loop_feature)
 
@@ -39,7 +41,9 @@ class State(BaseState):
 
     def onEnter(self, kwargs):
         self.ctx.set_node(kwargs["node"])
+        self.ctx.ensure_geo()
         self.ctx.ensure_mesh()
+        self.preview_feature.on_enter(self.ctx, kwargs)
         self.astar_feature.on_enter(self.ctx, kwargs)
         self.loop_feature.on_enter(self.ctx, kwargs)
         self.astar_feature.clear_preview(self.ctx)
@@ -49,20 +53,10 @@ class State(BaseState):
     def onExit(self, kwargs):
         self.astar_feature.on_exit(self.ctx, kwargs)
         self.loop_feature.on_exit(self.ctx, kwargs)
+        self.preview_feature.on_exit(self.ctx, kwargs)
 
     def onDraw(self, kwargs):
-        self.loop_feature.on_draw(self.ctx, kwargs)
-        self.astar_feature.on_draw(self.ctx, kwargs)
-
-    def onStartSelection(self, kwargs):
-        pass
-
-    def onStopSelection(self, kwargs):
-        pass
-
-    def onSelection(self, kwargs):
-        # Keep simple: interactions are mouse-chord driven.
-        return False
+        self.preview_feature.on_draw(self.ctx, kwargs)
 
     def onKeyEvent(self, kwargs):
         ui = kwargs.get("ui_event")
@@ -114,7 +108,7 @@ class State(BaseState):
         # SHIFT+A hover => preview A*
         if reason == hou.uiEventReason.Located:
             if self._shift_a_active and self._is_shift_down(dev):
-                hit = self._hit_edge(ui)
+                hit = self.ctx.hit_edge(ui)
                 if hit is None:
                     self.astar_feature.clear_preview(self.ctx)
                     return False
@@ -133,7 +127,7 @@ class State(BaseState):
         if not (is_lmb or is_mmb):
             return False
 
-        hit = self._hit_edge(ui)
+        hit = self.ctx.hit_edge(ui)
         if hit is None:
             self._reset_all()
             self._update_hud()
@@ -157,7 +151,7 @@ class State(BaseState):
         # Shift + LMB => set basegroup + append picked edge to grstr
         if is_lmb and shift:
             self.loop_feature.set_basegroup_from_edge(self.ctx, p0, p1)
-            self._append_edge_to_grstr(p0, p1)
+            self.ctx.append_edge_to_grstr(p0, p1)
             self._update_hud()
             return True
 
@@ -169,29 +163,6 @@ class State(BaseState):
             return True
 
         return False
-
-    def _hit_edge(self, ui_event):
-        if self.ctx.gi is None:
-            return None
-
-        rpos, rdir = ui_event.ray()
-        if not self.ctx.gi.intersect(rpos, rdir):
-            return None
-
-        closest_edge = self.ctx.gi._closest_edge()
-        if closest_edge is None:
-            return None
-
-        pts = closest_edge.points()
-        if len(pts) < 2:
-            return None
-
-        p0 = pts[0].number()
-        p1 = pts[1].number()
-        he = self.ctx.edge_to_hedge(p0, p1)
-        if he < 0:
-            return None
-        return p0, p1, he
 
     def _reset_all(self):
         self.astar_feature.reset_all(self.ctx)
@@ -218,18 +189,6 @@ class State(BaseState):
             self.scene_viewer.hudInfo(hud_values=values)
         except Exception:
             pass
-
-    def _append_edge_to_grstr(self, p0, p1):
-        if self.ctx.parm_string is None:
-            return
-
-        token = "p{0}-{1}".format(int(p0), int(p1))
-        cur = self.ctx.parm_string.eval() or ""
-        cur = cur.strip()
-        if not cur:
-            self.ctx.parm_string.set(token)
-        else:
-            self.ctx.parm_string.set(cur + " " + token)
 
     def _is_shift_down(self, dev):
         # Compatibility shim for older internal calls.

@@ -2,9 +2,9 @@ import hou
 import viewerstate.utils as su
 
 from skyforge.forge_states.base_state import BaseState
-from skyforge.forge_states.auto_axis_context import AutoAxisContext
-from skyforge.forge_states.features.auto_axis_move_feature import AutoAxisMoveFeature
-from skyforge.forge_states.features.auto_axis_hover_feature import AutoAxisHoverFeature
+from skyforge.forge_states.tool_context import ToolContext
+from skyforge.forge_states.features.move_feature import AutoAxisMoveFeature
+from skyforge.forge_states.features.preview_feature import PreviewFeature
 
 
 class State(BaseState):
@@ -25,58 +25,59 @@ class State(BaseState):
 
     STASH_NODE_NAME = "stash1"
     INPUT_NODE_NAME = "INPUT"
-    ENABLE_HOVER_FEATURE = True
+    ENABLE_PREVIEW_FEATURE = True
     ENABLE_MOVE_FEATURE = True
 
     def __init__(self, state_name, scene_viewer):
         super().__init__(scene_viewer=scene_viewer, state_name=state_name)
-        self.ctx = AutoAxisContext(scene_viewer, state_name=state_name)
+        self.ctx = ToolContext(scene_viewer, state_name=state_name)
 
         self.move_feature = AutoAxisMoveFeature()
-        self.hover_feature = AutoAxisHoverFeature()
+        self.preview_feature = PreviewFeature(prefix="auto_axis_mod", enable_hover=True)
         if self.ENABLE_MOVE_FEATURE:
             self.register_feature("move", self.move_feature)
-        if self.ENABLE_HOVER_FEATURE:
-            self.register_feature("hover", self.hover_feature)
-
-        self.point_gadget = None
-        self.edge_gadget = None
-        self.face_gadget = None
+        if self.ENABLE_PREVIEW_FEATURE:
+            self.register_feature("preview", self.preview_feature)
 
     def onEnter(self, kwargs):
         self.ctx.set_node(kwargs["node"])
         self.ctx.load_point_radius_from_node()
-        self.ctx.ensure_edit_geo(
+        geo = self.ctx.ensure_edit_geo(
             stash_node_name=self.STASH_NODE_NAME,
             input_node_name=self.INPUT_NODE_NAME,
         )
-        self._init_gadgets()
+        self.ctx.ensure_mesh(geo=geo)
+        if self.ENABLE_PREVIEW_FEATURE:
+            self.call_feature(self.preview_feature, "on_enter", self.ctx, kwargs)
         self._setup_hud()
         self._update_hud()
         if self.ENABLE_MOVE_FEATURE:
             self.call_feature(self.move_feature, "on_enter", self.ctx, kwargs)
-        if self.ENABLE_HOVER_FEATURE:
-            self.call_feature(self.hover_feature, "on_enter", self.ctx, kwargs)
 
     def onExit(self, kwargs):
         if self.ENABLE_MOVE_FEATURE:
             self.call_feature(self.move_feature, "on_exit", self.ctx, kwargs)
-        if self.ENABLE_HOVER_FEATURE:
-            self.call_feature(self.hover_feature, "on_exit", self.ctx, kwargs)
+        if self.ENABLE_PREVIEW_FEATURE:
+            self.call_feature(self.preview_feature, "on_exit", self.ctx, kwargs)
 
     def onMouseEvent(self, kwargs):
-        self.ctx.set_service("state_context", self._state_context())
+        ui_event = kwargs.get("ui_event")
+        if ui_event is None:
+            return False
+
+        hit = self.ctx.hit_info(ui_event, geo=self.ctx.edit_geo)
+        self.ctx.set_service("hit", hit)
+
+        if self.ENABLE_PREVIEW_FEATURE:
+            self.call_feature(self.preview_feature, "on_mouse_event", self.ctx, kwargs)
         if self.ENABLE_MOVE_FEATURE:
             return bool(self.call_feature(self.move_feature, "on_mouse_event", self.ctx, kwargs))
         return False
 
     def onDraw(self, kwargs):
         state_context = self._state_context()
-        self.ctx.set_service("state_context", state_context)
-        if state_context is None:
-            return
         try:
-            if state_context.isPicking():
+            if state_context is not None and state_context.isPicking():
                 return
         except Exception:
             pass
@@ -87,22 +88,14 @@ class State(BaseState):
             move_interacting = bool(self.call_feature(self.move_feature, "is_interacting"))
         changed = self.ctx.sync_edit_geo(force=False, allow_sync=(not move_interacting))
         if changed:
-            self._refresh_gadgets_geometry()
-            if self.ENABLE_HOVER_FEATURE:
-                self.call_feature(self.hover_feature, "refresh_geometry", self.ctx)
+            self.ctx.ensure_mesh(geo=self.ctx.edit_geo)
+            if self.ENABLE_PREVIEW_FEATURE:
+                self.call_feature(self.preview_feature, "refresh_geometry", self.ctx)
 
-        handle = kwargs["draw_handle"]
-        if self.ctx.select_mode == "POINT" and self.point_gadget is not None:
-            self.point_gadget.draw(handle)
-        elif self.ctx.select_mode == "EDGE" and self.edge_gadget is not None:
-            self.edge_gadget.draw(handle)
-        elif self.ctx.select_mode == "FACE" and self.face_gadget is not None:
-            self.face_gadget.draw(handle)
-
-        if self.ENABLE_HOVER_FEATURE:
-            self.call_feature(self.hover_feature, "on_draw", self.ctx, kwargs)
         if self.ENABLE_MOVE_FEATURE:
             self.call_feature(self.move_feature, "on_draw", self.ctx, kwargs)
+        if self.ENABLE_PREVIEW_FEATURE:
+            self.call_feature(self.preview_feature, "on_draw", self.ctx, kwargs)
 
     def onMenuAction(self, kwargs):
         action = kwargs.get("menu_item")
@@ -126,44 +119,8 @@ class State(BaseState):
             return True
         return False
 
-    def _init_gadgets(self):
-        self.point_gadget = self._get_state_gadget("point_gadget")
-        self.edge_gadget = self._get_state_gadget("edge_gadget")
-        self.face_gadget = self._get_state_gadget("face_gadget")
-
-        if self.point_gadget is not None:
-            self.point_gadget.setParams({"draw_color": [1, 1, 1, 0.0], "radius": self.ctx.point_radius})
-            self.point_gadget.show(True)
-        if self.edge_gadget is not None:
-            self.edge_gadget.setParams({"draw_color": [1, 1, 1, 0.0]})
-            self.edge_gadget.show(True)
-        if self.face_gadget is not None:
-            self.face_gadget.setParams({"draw_color": [1, 1, 1, 0.0]})
-            self.face_gadget.show(True)
-
-        self._refresh_gadgets_geometry()
-        if self.ENABLE_HOVER_FEATURE:
-            self.call_feature(self.hover_feature, "refresh_geometry", self.ctx)
-
-    def _get_state_gadget(self, name):
-        try:
-            return self.state_gadgets[name]
-        except Exception:
-            return None
-
     def _state_context(self):
         return getattr(self, "state_context", None)
-
-    def _refresh_gadgets_geometry(self):
-        geo = self.ctx.edit_geo
-        if geo is None:
-            return
-        if self.point_gadget is not None:
-            self.point_gadget.setGeometry(geo)
-        if self.edge_gadget is not None:
-            self.edge_gadget.setGeometry(geo)
-        if self.face_gadget is not None:
-            self.face_gadget.setGeometry(geo)
 
     def _setup_hud(self):
         try:
@@ -197,11 +154,8 @@ class State(BaseState):
         if abs(self.ctx.point_radius - prev) < 1e-6:
             return
 
-        if self.point_gadget is not None:
-            self.point_gadget.setParams({"radius": float(self.ctx.point_radius)})
-
-        if self.ENABLE_HOVER_FEATURE:
-            self.call_feature(self.hover_feature, "apply_point_radius", self.ctx)
+        if self.ENABLE_PREVIEW_FEATURE:
+            self.call_feature(self.preview_feature, "apply_point_radius", self.ctx)
 
         self.ctx.save_point_radius_to_node()
         self._update_hud()
@@ -235,10 +189,6 @@ def createViewerStateTemplate():
     template = hou.ViewerStateTemplate(state_typename, state_label, state_cat)
     template.bindFactory(State)
     template.bindIcon("$SK_ICONS/devtools.svg")
-
-    template.bindGadget(hou.drawableGeometryType.Point, "point_gadget", label="Point")
-    template.bindGadget(hou.drawableGeometryType.Face, "face_gadget", label="Face")
-    template.bindGadget(hou.drawableGeometryType.Line, "edge_gadget", label="Edge")
 
     hotkey_definitions = hou.PluginHotkeyDefinitions()
     menu = hou.ViewerStateMenu(state_typename + "_menu", state_label)

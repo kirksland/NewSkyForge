@@ -1,7 +1,6 @@
 import hou
 import resourceutils as ru
 
-from skyforge import forge_draw as draw
 from skyforge import forge_mesh as mesh
 from skyforge import forge_motion as motion
 from skyforge.forge_states.feature_base import ViewerFeature
@@ -22,7 +21,8 @@ class AutoAxisMoveFeature(ViewerFeature):
         self.dragger = None
         self._dragger_active = False
         self.color_options = None
-        self.guide_line = None
+        self.preview = None
+        self.guide_channel = "move_guide"
         self.guide_len = 0.3
 
         self._pending = False
@@ -44,34 +44,36 @@ class AutoAxisMoveFeature(ViewerFeature):
         self._drag_axis = None
 
     def on_enter(self, ctx, kwargs):
+        """Initialize drag runtime and guide preview channel."""
         self.dragger = hou.ViewerStateDragger("dragger") if self.enable_dragger else None
         self._dragger_active = False
         self.color_options = ru.ColorOptions(ctx.scene_viewer)
-        if self.enable_guide_line:
-            self._init_guide_line(ctx)
+        self.preview = ctx.get_service("preview")
+        if self.enable_guide_line and self.preview is not None:
+            color = self.color_options.colorFromName("PickedHandleColor")
+            self.preview.ensure_line_channel(self.guide_channel, color, line_width=2.0)
         self._reset_runtime(close_undo=False, scene_viewer=ctx.scene_viewer)
 
     def on_exit(self, ctx, kwargs):
+        """Stop active drag and hide guide visuals."""
         self._cleanup_drag(ctx, close_undo=True)
         self._hide_guide_line()
 
     def on_draw(self, ctx, kwargs):
-        if self.guide_line is not None:
-            self.guide_line.draw(kwargs["draw_handle"])
+        """No local draw: guide is rendered through PreviewFeature."""
+        return
 
     def is_interacting(self):
+        """Return True while a move drag/undo transaction is active."""
         return bool(self._pending or self._is_dragging or self._undo_opened)
 
     def on_mouse_event(self, ctx, kwargs):
+        """Main move interaction entrypoint (start/update/finish)."""
         if ctx.tool_mode != "MOVE":
             return False
 
         ui_event = kwargs.get("ui_event")
         if ui_event is None:
-            return False
-
-        state_context = ctx.get_service("state_context")
-        if state_context is None:
             return False
 
         if ctx.edit_geo is None:
@@ -85,28 +87,19 @@ class AutoAxisMoveFeature(ViewerFeature):
         except Exception:
             return False
 
-        gad = state_context.gadget()
-        if ctx.select_mode == "POINT":
-            ok = (gad == "point_gadget")
-        elif ctx.select_mode == "EDGE":
-            ok = (gad == "edge_gadget")
-        else:
-            ok = (gad == "face_gadget")
-
-        if not ok:
-            if self._pending or self._undo_opened or self._is_dragging:
-                self._cleanup_drag(ctx, close_undo=True)
-            return False
-
         if reason == hou.uiEventReason.Start:
-            return self._move_start(ctx, state_context, cur_mouse)
+            hit = ctx.get_service("hit") or {}
+            return self._move_start(ctx, hit, cur_mouse)
 
         if reason in (hou.uiEventReason.Active, hou.uiEventReason.Changed):
+            if not (self._pending or self._is_dragging or self._undo_opened):
+                return False
             return self._move_update(ctx, ui_event, reason, cur_mouse)
 
         return False
 
-    def _move_start(self, ctx, state_context, cur_mouse):
+    def _move_start(self, ctx, hit, cur_mouse):
+        """Capture selection origin and open state undo."""
         self._pending = True
         self._start_mouse = cur_mouse
         self._last_mouse = cur_mouse
@@ -117,20 +110,29 @@ class AutoAxisMoveFeature(ViewerFeature):
         self._affected_ptnums = None
 
         if ctx.select_mode == "POINT":
-            ptnum = state_context.component1()
+            ptnum = int(hit.get("point", -1))
+            if ptnum < 0:
+                self._reset_runtime(close_undo=False, scene_viewer=ctx.scene_viewer)
+                return False
             pt = ctx.edit_geo.point(ptnum)
             if pt is None:
+                self._reset_runtime(close_undo=False, scene_viewer=ctx.scene_viewer)
                 return False
             self._ptnum = ptnum
             self._origin = pt.position()
             self._affected_ptnums = [ptnum]
 
         elif ctx.select_mode == "EDGE":
-            p0 = state_context.component1()
-            p1 = state_context.component2()
+            edge = hit.get("edge")
+            if edge is None:
+                self._reset_runtime(close_undo=False, scene_viewer=ctx.scene_viewer)
+                return False
+            p0 = int(edge[0])
+            p1 = int(edge[1])
             pt0 = ctx.edit_geo.point(p0)
             pt1 = ctx.edit_geo.point(p1)
             if pt0 is None or pt1 is None:
+                self._reset_runtime(close_undo=False, scene_viewer=ctx.scene_viewer)
                 return False
             self._edge_p0 = p0
             self._edge_p1 = p1
@@ -138,9 +140,13 @@ class AutoAxisMoveFeature(ViewerFeature):
             self._affected_ptnums = [p0, p1]
 
         else:  # FACE
-            primnum = state_context.component1()
+            primnum = int(hit.get("prim", -1))
+            if primnum < 0:
+                self._reset_runtime(close_undo=False, scene_viewer=ctx.scene_viewer)
+                return False
             prim = ctx.edit_geo.prim(primnum)
             if prim is None:
+                self._reset_runtime(close_undo=False, scene_viewer=ctx.scene_viewer)
                 return False
             self._primnum = primnum
             self._origin = mesh.prim_center(prim)
@@ -157,6 +163,7 @@ class AutoAxisMoveFeature(ViewerFeature):
         return True
 
     def _move_update(self, ctx, ui_event, reason, cur_mouse):
+        """Resolve axis, apply delta on affected points, push to stash."""
         if self._pending:
             md = cur_mouse - self._start_mouse
 
@@ -285,28 +292,27 @@ class AutoAxisMoveFeature(ViewerFeature):
 
         return True
 
-    def _init_guide_line(self, ctx):
-        color = self.color_options.colorFromName("PickedHandleColor")
-        self.guide_line = draw.LineFX(ctx.scene_viewer, "auto_axis_mod_guide_line", color, line_width=2.0)
-        self.guide_line.hide()
-
     def _update_guide_line(self, origin, axis_dir):
-        if not self.enable_guide_line or self.guide_line is None:
+        """Update guide channel from origin and selected axis."""
+        if not self.enable_guide_line or self.preview is None:
             return
         if origin is None or axis_dir is None or axis_dir.length() < 1e-6:
-            self.guide_line.hide()
+            self.preview.hide(self.guide_channel)
             return
         a = axis_dir.normalized()
-        self.guide_line.set_line(origin, origin + a * self.guide_len)
+        self.preview.set_line_segment_world(self.guide_channel, origin, origin + a * self.guide_len)
 
     def _hide_guide_line(self):
-        if self.guide_line is not None:
-            self.guide_line.hide()
+        """Hide move guide channel."""
+        if self.preview is not None:
+            self.preview.hide(self.guide_channel)
 
     def _cleanup_drag(self, ctx, close_undo):
+        """Cleanup wrapper preserving undo close behavior."""
         self._reset_runtime(close_undo=close_undo, scene_viewer=ctx.scene_viewer)
 
     def _reset_runtime(self, close_undo, scene_viewer):
+        """Reset transient drag state and optionally close state undo."""
         self._pending = False
         try:
             if self.dragger is not None and self._dragger_active:
@@ -339,6 +345,7 @@ class AutoAxisMoveFeature(ViewerFeature):
             self._undo_opened = False
 
     def _pick_connected_edge_dir_from_point(self, ctx, origin, mouse_delta, ptnum):
+        """Pick best outgoing edge direction from point using mouse motion."""
         nbrs = mesh.connected_neighbors(ctx.edit_geo, ptnum)
         if not nbrs:
             return None, 1.0
@@ -361,6 +368,7 @@ class AutoAxisMoveFeature(ViewerFeature):
         return edge_dirs[key].normalized(), sign
 
     def _pick_axis_for_selected_edge(self, ctx, origin, mouse_delta, p0, p1):
+        """Pick tangent orientation for currently selected edge."""
         t = mesh.edge_tangent(ctx.edit_geo, p0, p1)
         if t is None:
             return None, 1.0
@@ -370,6 +378,7 @@ class AutoAxisMoveFeature(ViewerFeature):
         return t, sign
 
     def _world_axes(self):
+        """Return canonical world axis dictionary."""
         return {
             "X": hou.Vector3(1, 0, 0),
             "Y": hou.Vector3(0, 1, 0),
@@ -377,6 +386,7 @@ class AutoAxisMoveFeature(ViewerFeature):
         }
 
     def _delta_from_mouse_without_dragger(self, ctx, cur_mouse):
+        """Fallback axis-projected delta when dragger is disabled."""
         if self._drag_axis is None or self._origin is None:
             self._last_mouse = cur_mouse
             return None

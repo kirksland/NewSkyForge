@@ -2,27 +2,38 @@ import re
 import hou
 
 from skyforge.forge_states.feature_base import ViewerFeature
-from skyforge.forge_states.style import LINE_WIDTH, COLOR_PREVIEW_YELLOW
+from skyforge.forge_states.style import LINE_WIDTH, COLOR_PREVIEW_YELLOW, COLOR_COMMITTED_ORANGE
 
 
 class TransversalLoopFeature(ViewerFeature):
     name = "transversal_loop"
 
     def __init__(self):
-        self.preview_geo = None
-        self.preview_drawable = None
+        self.preview = None
+        self.ch_preview = "loop_preview"
+        self.ch_committed = "loop_committed"
         self.mode = "roll"  # "roll" (transversal) or "quad"
 
     def on_enter(self, ctx, kwargs):
-        self._init_preview(ctx)
+        self.preview = ctx.get_service("preview")
+        self.preview.ensure_line_channel(
+            self.ch_preview,
+            COLOR_PREVIEW_YELLOW,
+            line_width=float(LINE_WIDTH),
+        )
+        self.preview.ensure_line_channel(
+            self.ch_committed,
+            COLOR_COMMITTED_ORANGE,
+            line_width=float(LINE_WIDTH),
+        )
         print("[SkyForge] TransversalLoopFeature mode:", self.mode, "(R=roll, Q=quad, X=toggle)")
 
     def on_exit(self, ctx, kwargs):
         self._hide_preview(ctx)
+        self._hide_committed(ctx)
 
     def on_draw(self, ctx, kwargs):
-        if self.preview_drawable is not None:
-            self.preview_drawable.draw(kwargs["draw_handle"])
+        return
 
     def on_key_event(self, ctx, kwargs):
         ui = kwargs.get("ui_event")
@@ -79,7 +90,7 @@ class TransversalLoopFeature(ViewerFeature):
             self._hide_preview(ctx)
             return False
 
-        self._set_preview_path(ctx, path)
+        self._set_committed_path(ctx, path)
         if ctx.parm_string is not None:
             ctx.parm_string.set(ctx.hedges_to_group_string(path))
         return True
@@ -145,7 +156,7 @@ class TransversalLoopFeature(ViewerFeature):
             self._hide_preview(ctx)
             return True
 
-        self._set_preview_path(ctx, path)
+        self._set_committed_path(ctx, path)
         if ctx.parm_string is not None:
             ctx.parm_string.set(ctx.hedges_to_group_string(path))
         return True
@@ -170,62 +181,33 @@ class TransversalLoopFeature(ViewerFeature):
                 return int(m2.group(1)), int(m2.group(2))
         return None
 
-    def _init_preview(self, ctx):
-        self.preview_geo = hou.Geometry()
-        self.preview_drawable = hou.GeometryDrawable(
-            ctx.scene_viewer,
-            hou.drawableGeometryType.Line,
-            "pyd_loop_modular_transversal_preview",
-            params={
-                "style": hou.drawableGeometryLineStyle.Plain,
-                "color1": COLOR_PREVIEW_YELLOW,
-                "line_width": float(LINE_WIDTH),
-            },
-        )
-        self.preview_drawable.setGeometry(self.preview_geo)
-        self.preview_drawable.show(False)
-
     def _hide_preview(self, ctx):
-        if self.preview_drawable is not None:
-            self.preview_drawable.show(False)
-            self._request_draw(ctx)
+        self.preview.hide(self.ch_preview)
+        self._request_draw(ctx)
+
+    def _hide_committed(self, ctx):
+        self.preview.hide(self.ch_committed)
+        self._request_draw(ctx)
 
     def _set_preview_path(self, ctx, hedges):
+        self._set_path(ctx, hedges, committed=False)
+
+    def _set_committed_path(self, ctx, hedges):
+        self._set_path(ctx, hedges, committed=True)
+
+    def _set_path(self, ctx, hedges, committed):
+        channel = self.ch_committed if committed else self.ch_preview
         if not hedges or ctx.geometry is None:
-            self._hide_preview(ctx)
+            self.preview.hide(channel)
+            self._request_draw(ctx)
             return
-
-        geo = hou.Geometry()
-        seg_count = 0
-        for he in hedges:
-            src = int(ctx.mesh.src(he))
-            dst = int(ctx.mesh.dst(he))
-            psrc = ctx.geometry.point(src)
-            pt = ctx.geometry.point(dst)
-            if psrc is None or pt is None:
-                continue
-
-            # Draw each loop edge as an independent segment to avoid
-            # visual connectors between non-consecutive loop members.
-            poly = geo.createPolygon()
-            poly.setIsClosed(False)
-
-            p0 = geo.createPoint()
-            p0.setPosition(psrc.position())
-            poly.addVertex(p0)
-
-            p1 = geo.createPoint()
-            p1.setPosition(pt.position())
-            poly.addVertex(p1)
-            seg_count += 1
-
-        if seg_count == 0:
-            self._hide_preview(ctx)
-            return
-
-        self.preview_geo = geo
-        self.preview_drawable.setGeometry(self.preview_geo)
-        self.preview_drawable.show(True)
+        self.preview.set_line_from_hedges(
+            channel,
+            ctx.geometry,
+            ctx.mesh,
+            hedges,
+            segments=True,
+        )
         self._request_draw(ctx)
 
     def _request_draw(self, ctx):
@@ -235,37 +217,18 @@ class TransversalLoopFeature(ViewerFeature):
             pass
 
     def _hit_edge(self, ctx, ui_event):
-        if ctx.gi is None:
+        hit = ctx.hit_edge(ui_event)
+        if hit is None:
             return None
-        rpos, rdir = ui_event.ray()
-        if not ctx.gi.intersect(rpos, rdir):
-            return None
-
-        closest_edge = ctx.gi._closest_edge()
-        if closest_edge is None:
-            return None
-
-        pts = closest_edge.points()
-        if len(pts) < 2:
-            return None
-        return pts[0].number(), pts[1].number()
+        return int(hit[0]), int(hit[1])
 
     def _set_basegroup_from_points(self, ctx, p0, p1):
-        if ctx.node is None:
-            return
-        parm = ctx.node.parm("basegroup")
-        if parm is None:
-            return
-        parm.set(f"p{int(p0)}-{int(p1)}")
+        ctx.set_basegroup_from_points(p0, p1)
 
     def _reset_session(self, ctx):
         self._hide_preview(ctx)
-        if ctx.node is None:
-            return
-        for parm_name in ("grstr", "basegroup"):
-            parm = ctx.node.parm(parm_name)
-            if parm is not None:
-                parm.set("")
+        self._hide_committed(ctx)
+        ctx.clear_group_parms(("grstr", "basegroup"))
 
     def _is_shift_down(self, dev):
         try:
