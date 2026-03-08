@@ -3,7 +3,8 @@ import viewerstate.utils as su
 
 from skyforge.forge_states.base_state import BaseState
 from skyforge.forge_states.tool_context import ToolContext
-from skyforge.forge_states.features.move_feature import AutoAxisMoveFeature
+from skyforge.forge_states import constants as k
+from skyforge.forge_states.features.move_feature import MoveFeature
 from skyforge.forge_states.features.preview_feature import PreviewFeature
 
 
@@ -23,8 +24,8 @@ class State(BaseState):
         ],
     }
 
-    STASH_NODE_NAME = "stash1"
-    INPUT_NODE_NAME = "INPUT"
+    STASH_NODE_NAME = k.DEFAULT_STASH_NODE_NAME
+    INPUT_NODE_NAME = k.DEFAULT_INPUT_NODE_NAME
     ENABLE_PREVIEW_FEATURE = True
     ENABLE_MOVE_FEATURE = True
 
@@ -32,7 +33,7 @@ class State(BaseState):
         super().__init__(scene_viewer=scene_viewer, state_name=state_name)
         self.ctx = ToolContext(scene_viewer, state_name=state_name)
 
-        self.move_feature = AutoAxisMoveFeature()
+        self.move_feature = MoveFeature()
         self.preview_feature = PreviewFeature(prefix="auto_axis_mod", enable_hover=True)
         if self.ENABLE_MOVE_FEATURE:
             self.register_feature("move", self.move_feature)
@@ -129,9 +130,9 @@ class State(BaseState):
             pass
 
     def _update_hud(self):
-        mode_order = ["LOCAL", "WORLD", "EDGE"]
-        sel_order = ["POINT", "EDGE", "FACE"]
-        tool_order = ["MOVE", "CUT"]
+        mode_order = list(k.AUTO_AXIS_MODE_ORDER)
+        sel_order = list(k.AUTO_AXIS_SELECT_ORDER)
+        tool_order = list(k.AUTO_AXIS_TOOL_ORDER)
 
         values = {
             "mode": self.ctx.mode,
@@ -161,24 +162,24 @@ class State(BaseState):
         self._update_hud()
 
     def _cycle_mode(self):
-        order = ["LOCAL", "WORLD", "EDGE"]
-        self.ctx.mode = order[(order.index(self.ctx.mode) + 1) % len(order)] if self.ctx.mode in order else "LOCAL"
+        order = list(k.AUTO_AXIS_MODE_ORDER)
+        self.ctx.mode = order[(order.index(self.ctx.mode) + 1) % len(order)] if self.ctx.mode in order else k.AUTO_AXIS_MODE_ORDER[0]
 
     def _cycle_select_mode(self):
-        order = ["POINT", "EDGE", "FACE"]
+        order = list(k.AUTO_AXIS_SELECT_ORDER)
         self.ctx.select_mode = (
             order[(order.index(self.ctx.select_mode) + 1) % len(order)]
-            if self.ctx.select_mode in order else "POINT"
+            if self.ctx.select_mode in order else k.AUTO_AXIS_SELECT_ORDER[0]
         )
-        if self.ctx.tool_mode == "CUT":
-            self.ctx.tool_mode = "MOVE"
+        if self.ctx.tool_mode == k.AUTO_AXIS_TOOL_ORDER[1]:
+            self.ctx.tool_mode = k.AUTO_AXIS_TOOL_ORDER[0]
 
     def _cycle_tool_mode(self):
-        self.ctx.tool_mode = "CUT" if self.ctx.tool_mode == "MOVE" else "MOVE"
-        if self.ctx.tool_mode == "CUT":
-            self.ctx.select_mode = "EDGE"
+        self.ctx.tool_mode = k.AUTO_AXIS_TOOL_ORDER[1] if self.ctx.tool_mode == k.AUTO_AXIS_TOOL_ORDER[0] else k.AUTO_AXIS_TOOL_ORDER[0]
+        if self.ctx.tool_mode == k.AUTO_AXIS_TOOL_ORDER[1]:
+            self.ctx.select_mode = k.AUTO_AXIS_SELECT_ORDER[1]
         else:
-            self.ctx.select_mode = "POINT"
+            self.ctx.select_mode = k.AUTO_AXIS_SELECT_ORDER[0]
 
 
 def createViewerStateTemplate():

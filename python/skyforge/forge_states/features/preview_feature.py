@@ -1,8 +1,10 @@
 import hou
 import resourceutils as ru
 
-from skyforge.forge_states.feature_base import ViewerFeature
-from skyforge.forge_states.preview_service import PreviewService
+from ..feature_base import ViewerFeature
+from ..preview_service import PreviewService
+from .. import preview_channels as ch
+from .. import constants as k
 
 
 class PreviewFeature(ViewerFeature):
@@ -21,10 +23,10 @@ class PreviewFeature(ViewerFeature):
         self.preview = None
         self.color_options = None
 
-        self.ch_edge = "hover_edge"
-        self.ch_point_rest = "point_rest"
-        self.ch_point_hover = "hover_point"
-        self.ch_face = "hover_face"
+        self.ch_edge = ch.CH_HOVER_EDGE
+        self.ch_point_rest = ch.CH_POINT_REST
+        self.ch_point_hover = ch.CH_HOVER_POINT
+        self.ch_face = ch.CH_HOVER_FACE
 
     def on_enter(self, ctx, kwargs):
         """Create/reuse preview service and initialize optional hover channels."""
@@ -126,7 +128,7 @@ class PreviewFeature(ViewerFeature):
         col_hover = self.color_options.colorFromName("PickedHandleColor")
         col_rest = self.color_options.colorFromName("HandleZAxisColor")
 
-        self.preview.ensure_line_channel(self.ch_edge, col_hover, line_width=3.0)
+        self.preview.ensure_line_channel(self.ch_edge, col_hover, line_width=float(k.LINE_WIDTH))
         self.preview.ensure_point_channel(
             self.ch_point_rest,
             col_rest,

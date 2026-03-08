@@ -1,8 +1,16 @@
 import re
 import hou
 
-from skyforge.forge_states.feature_base import ViewerFeature
-from skyforge.forge_states.style import LINE_WIDTH, COLOR_PREVIEW_YELLOW, COLOR_COMMITTED_ORANGE
+from ..feature_base import ViewerFeature
+from .. import preview_channels as ch
+from ..constants import (
+    LINE_WIDTH,
+    COLOR_PREVIEW_YELLOW,
+    COLOR_COMMITTED_ORANGE,
+    LOOP_MODE_ROLL,
+    LOOP_MODE_QUAD,
+    GROUP_PARM_NAMES,
+)
 
 
 class TransversalLoopFeature(ViewerFeature):
@@ -10,9 +18,9 @@ class TransversalLoopFeature(ViewerFeature):
 
     def __init__(self):
         self.preview = None
-        self.ch_preview = "loop_preview"
-        self.ch_committed = "loop_committed"
-        self.mode = "roll"  # "roll" (transversal) or "quad"
+        self.ch_preview = ch.CH_LOOP_PREVIEW
+        self.ch_committed = ch.CH_LOOP_COMMITTED
+        self.mode = LOOP_MODE_ROLL  # transversal or quad
 
     def on_enter(self, ctx, kwargs):
         self.preview = ctx.get_service("preview")
@@ -46,15 +54,15 @@ class TransversalLoopFeature(ViewerFeature):
 
         key = (dev.keyString() or "").lower()
         if key in ("r", "&"):
-            self.mode = "roll"
+            self.mode = LOOP_MODE_ROLL
             print("[SkyForge] Transversal loop mode -> roll")
             return True
         if key == "q":
-            self.mode = "quad"
+            self.mode = LOOP_MODE_QUAD
             print("[SkyForge] Transversal loop mode -> quad")
             return True
         if key == "x":
-            self.mode = "quad" if self.mode == "roll" else "roll"
+            self.mode = LOOP_MODE_QUAD if self.mode == LOOP_MODE_ROLL else LOOP_MODE_ROLL
             print("[SkyForge] Transversal loop mode ->", self.mode)
             return True
         return False
@@ -162,7 +170,7 @@ class TransversalLoopFeature(ViewerFeature):
         return True
 
     def _compute_loop(self, ctx, he):
-        if self.mode == "quad":
+        if self.mode == LOOP_MODE_QUAD:
             return ctx.mesh.edge_loop_quad(he, 10000, 1)
         return ctx.mesh.edge_loop_roll(he, 10000, 1)
 
@@ -228,7 +236,7 @@ class TransversalLoopFeature(ViewerFeature):
     def _reset_session(self, ctx):
         self._hide_preview(ctx)
         self._hide_committed(ctx)
-        ctx.clear_group_parms(("grstr", "basegroup"))
+        ctx.clear_group_parms(GROUP_PARM_NAMES)
 
     def _is_shift_down(self, dev):
         try:

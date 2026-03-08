@@ -5,6 +5,7 @@ import viewerstate.utils as su
 import skyforge.skyforge_core as core
 
 from .base_context import BaseContext
+from . import constants as k
 from skyforge import forge_store as store
 
 
@@ -33,19 +34,19 @@ class ToolContext(BaseContext):
         self.edit_geo = None
 
         # Auto-axis style state
-        self.mode = "LOCAL"
-        self.select_mode = "POINT"
-        self.tool_mode = "MOVE"
-        self.point_radius = 5.0
-        self.point_radius_step = 1.0
-        self.point_radius_min = 1.0
-        self.point_radius_max = 24.0
-        self.point_hover_extra = 2.0
+        self.mode = k.AUTO_AXIS_MODE_ORDER[0]
+        self.select_mode = k.AUTO_AXIS_SELECT_ORDER[0]
+        self.tool_mode = k.AUTO_AXIS_TOOL_ORDER[0]
+        self.point_radius = k.POINT_RADIUS_DEFAULT
+        self.point_radius_step = k.POINT_RADIUS_STEP
+        self.point_radius_min = k.POINT_RADIUS_MIN
+        self.point_radius_max = k.POINT_RADIUS_MAX
+        self.point_hover_extra = k.POINT_HOVER_EXTRA
 
     def set_node(self, node):
         """Bind Houdini node and cache frequently used parms."""
         super().set_node(node)
-        self.parm_string = node.parm("grstr") if node is not None else None
+        self.parm_string = node.parm(k.PARM_GRSTR) if node is not None else None
 
     # ------------------------------------------------------------------
     # Half-edge / pick helpers
@@ -243,7 +244,7 @@ class ToolContext(BaseContext):
         """Set `basegroup` parm as one edge token `p<id>-<id>`."""
         if self.node is None:
             return
-        parm = self.node.parm("basegroup")
+        parm = self.node.parm(k.PARM_BASEGROUP)
         if parm is not None:
             parm.set("p{0}-{1}".format(int(p0), int(p1)))
 
@@ -255,11 +256,12 @@ class ToolContext(BaseContext):
         cur = (self.parm_string.eval() or "").strip()
         self.parm_string.set(token if not cur else (cur + " " + token))
 
-    def clear_group_parms(self, parm_names=("grstr", "basegroup")):
+    def clear_group_parms(self, parm_names=None):
         """Clear provided group-string parms on bound node."""
         if self.node is None:
             return
-        for name in parm_names:
+        names = parm_names if parm_names is not None else k.GROUP_PARM_NAMES
+        for name in names:
             parm = self.node.parm(name)
             if parm is not None:
                 parm.set("")
@@ -267,7 +269,7 @@ class ToolContext(BaseContext):
     # ------------------------------------------------------------------
     # Editable geo helpers
     # ------------------------------------------------------------------
-    def ensure_store(self, stash_node_name="stash1", input_node_name="INPUT"):
+    def ensure_store(self, stash_node_name=k.DEFAULT_STASH_NODE_NAME, input_node_name=k.DEFAULT_INPUT_NODE_NAME):
         """Create/reuse stash-backed editable geometry session."""
         if self.node is None:
             return None
@@ -279,7 +281,7 @@ class ToolContext(BaseContext):
             )
         return self.store
 
-    def ensure_edit_geo(self, stash_node_name="stash1", input_node_name="INPUT"):
+    def ensure_edit_geo(self, stash_node_name=k.DEFAULT_STASH_NODE_NAME, input_node_name=k.DEFAULT_INPUT_NODE_NAME):
         """Create/reuse editable geometry snapshot for tool operations."""
         st = self.ensure_store(stash_node_name=stash_node_name, input_node_name=input_node_name)
         if st is None:
@@ -327,4 +329,4 @@ class ToolContext(BaseContext):
     def _point_radius_key(self):
         """Build per-state userData key for point radius."""
         base = (self.state_name or "Tool").strip() or "Tool"
-        return "{0}.point_radius".format(base)
+        return "{0}.{1}".format(base, k.POINT_RADIUS_USERDATA_SUFFIX)

@@ -3,10 +3,12 @@ import resourceutils as ru
 
 from skyforge import forge_mesh as mesh
 from skyforge import forge_motion as motion
-from skyforge.forge_states.feature_base import ViewerFeature
+from ..feature_base import ViewerFeature
+from .. import preview_channels as ch
+from .. import constants as k
 
 
-class AutoAxisMoveFeature(ViewerFeature):
+class MoveFeature(ViewerFeature):
     """
     MOVE tool migration from legacy AutoAxis state.
     Handles point/edge/face drag with LOCAL/WORLD/EDGE axis picking.
@@ -22,8 +24,8 @@ class AutoAxisMoveFeature(ViewerFeature):
         self._dragger_active = False
         self.color_options = None
         self.preview = None
-        self.guide_channel = "move_guide"
-        self.guide_len = 0.3
+        self.guide_channel = ch.CH_MOVE_GUIDE
+        self.guide_len = float(k.MOVE_GUIDE_LENGTH)
 
         self._pending = False
         self._is_dragging = False
@@ -51,7 +53,7 @@ class AutoAxisMoveFeature(ViewerFeature):
         self.preview = ctx.get_service("preview")
         if self.enable_guide_line and self.preview is not None:
             color = self.color_options.colorFromName("PickedHandleColor")
-            self.preview.ensure_line_channel(self.guide_channel, color, line_width=2.0)
+            self.preview.ensure_line_channel(self.guide_channel, color, line_width=float(k.MOVE_GUIDE_LINE_WIDTH))
         self._reset_runtime(close_undo=False, scene_viewer=ctx.scene_viewer)
 
     def on_exit(self, ctx, kwargs):

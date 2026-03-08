@@ -3,11 +3,14 @@ import time
 
 import hou
 
-from skyforge.forge_states.feature_base import ViewerFeature
-from skyforge.forge_states.style import (
+from ..feature_base import ViewerFeature
+from .. import preview_channels as ch
+from ..constants import (
     LINE_WIDTH,
     COLOR_PREVIEW_YELLOW,
     COLOR_COMMITTED_ORANGE,
+    PARM_BASEGROUP,
+    GROUP_PARM_NAMES,
 )
 
 
@@ -19,8 +22,8 @@ class AstarTurnFeature(ViewerFeature):
         self.hover_he = -1
         self.committed_hedges = []
         self.preview = None
-        self.ch_preview = "astar_preview"
-        self.ch_committed = "astar_committed"
+        self.ch_preview = ch.CH_ASTAR_PREVIEW
+        self.ch_committed = ch.CH_ASTAR_COMMITTED
         self._last_commit_edge = -1
         self._last_commit_t = 0.0
 
@@ -43,7 +46,7 @@ class AstarTurnFeature(ViewerFeature):
             self.start_he = self.committed_hedges[-1]
             self._set_committed_path(ctx, self.committed_hedges)
 
-        bg = ctx.node.parm("basegroup") if ctx.node is not None else None
+        bg = ctx.node.parm(PARM_BASEGROUP) if ctx.node is not None else None
         if bg is not None:
             p0, p1 = self._first_edge_from_group(ctx, bg.eval())
             if p0 >= 0:
@@ -294,7 +297,7 @@ class AstarTurnFeature(ViewerFeature):
     def _start_from_basegroup(self, ctx):
         if ctx.node is None:
             return -1
-        parm = ctx.node.parm("basegroup")
+        parm = ctx.node.parm(PARM_BASEGROUP)
         if parm is None:
             return -1
 
@@ -312,4 +315,4 @@ class AstarTurnFeature(ViewerFeature):
         self.committed_hedges = []
         self._hide_preview(ctx)
         self._hide_committed(ctx)
-        ctx.clear_group_parms(("grstr", "basegroup"))
+        ctx.clear_group_parms(GROUP_PARM_NAMES)

@@ -2,6 +2,7 @@ import hou
 
 from skyforge.forge_states.tool_context import ToolContext
 from skyforge.forge_states.base_state import BaseState
+from skyforge.forge_states import constants as k
 from skyforge.forge_states.features import AstarTurnFeature, TransversalLoopFeature, PreviewFeature
 
 
@@ -176,9 +177,9 @@ class State(BaseState):
             pass
 
     def _update_hud(self):
-        mode = getattr(self.loop_feature, "mode", "roll")
-        mode_label = "Roll" if mode == "roll" else "Quad"
-        mode_idx = 0 if mode == "roll" else 1
+        mode = getattr(self.loop_feature, "mode", k.LOOP_MODE_ROLL)
+        mode_label = "Roll" if mode == k.LOOP_MODE_ROLL else "Quad"
+        mode_idx = 0 if mode == k.LOOP_MODE_ROLL else 1
         astar_label = "On" if self._shift_a_active else "Off"
         values = {
             "loop_mode": mode_label,
