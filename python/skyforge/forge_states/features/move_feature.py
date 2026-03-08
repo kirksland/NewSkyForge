@@ -111,6 +111,36 @@ class MoveFeature(ViewerFeature):
         self._drag_axis = None
         self._affected_ptnums = None
 
+        # Optional external composition hook:
+        # state can inject a custom set of points/origin for move start.
+        override = ctx.get_service("move_override")
+        if override:
+            try:
+                ptnums = [int(p) for p in (override.get("ptnums") or [])]
+            except Exception:
+                ptnums = []
+            origin = override.get("origin")
+            anchor = int(override.get("anchor_ptnum", ptnums[0] if ptnums else -1))
+            sel = str(override.get("select_mode", "POINT")).upper()
+            ctx.set_service("move_override", None)
+
+            if not ptnums or origin is None:
+                self._reset_runtime(close_undo=False, scene_viewer=ctx.scene_viewer)
+                return False
+
+            self._drag_select_used = sel
+            self._ptnum = anchor
+            self._affected_ptnums = ptnums
+            self._origin = origin
+
+            self._hide_guide_line()
+            try:
+                ctx.scene_viewer.beginStateUndo("AutoAxis move")
+                self._undo_opened = True
+            except Exception:
+                self._undo_opened = False
+            return True
+
         if ctx.select_mode == "POINT":
             ptnum = int(hit.get("point", -1))
             if ptnum < 0:
