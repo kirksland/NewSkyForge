@@ -4,7 +4,6 @@ import time
 import hou
 
 from ..feature_base import ViewerFeature
-from .. import preview_channels as ch
 from ..constants import (
     LINE_WIDTH,
     COLOR_PREVIEW_YELLOW,
@@ -12,6 +11,8 @@ from ..constants import (
     PARM_BASEGROUP,
     GROUP_PARM_NAMES,
     OUTPUT_MODE_EDGE,
+    CH_ASTAR_PREVIEW,
+    CH_ASTAR_COMMITTED,
 )
 
 
@@ -24,8 +25,8 @@ class AstarTurnFeature(ViewerFeature):
         self.committed_hedges = []
         self.output_mode = OUTPUT_MODE_EDGE
         self.preview = None
-        self.ch_preview = ch.CH_ASTAR_PREVIEW
-        self.ch_committed = ch.CH_ASTAR_COMMITTED
+        self.ch_preview = CH_ASTAR_PREVIEW
+        self.ch_committed = CH_ASTAR_COMMITTED
         self._last_commit_edge = -1
         self._last_commit_t = 0.0
 

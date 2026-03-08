@@ -3,7 +3,6 @@ import resourceutils as ru
 
 from ..feature_base import ViewerFeature
 from ..preview_service import PreviewService
-from .. import preview_channels as ch
 from .. import constants as k
 
 
@@ -23,10 +22,10 @@ class PreviewFeature(ViewerFeature):
         self.preview = None
         self.color_options = None
 
-        self.ch_edge = ch.CH_HOVER_EDGE
-        self.ch_point_rest = ch.CH_POINT_REST
-        self.ch_point_hover = ch.CH_HOVER_POINT
-        self.ch_face = ch.CH_HOVER_FACE
+        self.ch_edge = k.CH_HOVER_EDGE
+        self.ch_point_rest = k.CH_POINT_REST
+        self.ch_point_hover = k.CH_HOVER_POINT
+        self.ch_face = k.CH_HOVER_FACE
 
     def on_enter(self, ctx, kwargs):
         """Create/reuse preview service and initialize optional hover channels."""

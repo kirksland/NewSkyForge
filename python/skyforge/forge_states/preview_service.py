@@ -99,6 +99,27 @@ class PreviewService:
         ch["drawable"].setGeometry(geo)
         ch["drawable"].show(True)
 
+    def set_polyline_world(self, name, positions, closed=False):
+        """Set a line channel from an ordered list of world-space positions."""
+        key = str(name)
+        ch = self._channels.get(key)
+        if ch is None or ch["kind"] != "line":
+            return
+        if not positions or len(positions) < 2:
+            self.hide(key)
+            return
+
+        geo = hou.Geometry()
+        poly = geo.createPolygon()
+        poly.setIsClosed(bool(closed))
+        for pos in positions:
+            pt = geo.createPoint()
+            pt.setPosition(pos)
+            poly.addVertex(pt)
+
+        ch["drawable"].setGeometry(geo)
+        ch["drawable"].show(True)
+
     def set_line_from_hedges(self, name, geo_src, mesh, hedges, segments=False):
         """
         Set a line channel from half-edges.

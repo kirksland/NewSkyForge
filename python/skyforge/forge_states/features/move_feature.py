@@ -4,7 +4,6 @@ import resourceutils as ru
 from skyforge import forge_mesh as mesh
 from skyforge import forge_motion as motion
 from ..feature_base import ViewerFeature
-from .. import preview_channels as ch
 from .. import constants as k
 
 
@@ -24,7 +23,7 @@ class MoveFeature(ViewerFeature):
         self._dragger_active = False
         self.color_options = None
         self.preview = None
-        self.guide_channel = ch.CH_MOVE_GUIDE
+        self.guide_channel = k.CH_MOVE_GUIDE
         self.guide_len = float(k.MOVE_GUIDE_LENGTH)
 
         self._pending = False

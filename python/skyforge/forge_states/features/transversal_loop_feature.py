@@ -2,7 +2,6 @@ import re
 import hou
 
 from ..feature_base import ViewerFeature
-from .. import preview_channels as ch
 from ..constants import (
     LINE_WIDTH,
     COLOR_PREVIEW_YELLOW,
@@ -11,6 +10,8 @@ from ..constants import (
     LOOP_MODE_QUAD,
     GROUP_PARM_NAMES,
     OUTPUT_MODE_EDGE,
+    CH_LOOP_PREVIEW,
+    CH_LOOP_COMMITTED,
 )
 
 
@@ -19,8 +20,8 @@ class TransversalLoopFeature(ViewerFeature):
 
     def __init__(self):
         self.preview = None
-        self.ch_preview = ch.CH_LOOP_PREVIEW
-        self.ch_committed = ch.CH_LOOP_COMMITTED
+        self.ch_preview = CH_LOOP_PREVIEW
+        self.ch_committed = CH_LOOP_COMMITTED
         self.mode = LOOP_MODE_ROLL  # transversal or quad
         self.output_mode = OUTPUT_MODE_EDGE
 
