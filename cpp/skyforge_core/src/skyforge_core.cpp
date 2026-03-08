@@ -19,14 +19,14 @@ static inline uint64_t pack_edge(int src, int dst)
 struct HalfEdgeMeshData
 {
     int num_points = 0;
-    std::vector<int> src, dst, next, prev, twin, equiv_next;
+    std::vector<int> src, dst, next, prev, twin, equiv_next, prim;
     std::unordered_map<uint64_t, int> edge_map; // (src,dst)->he (primary)
 
     void clear()
     {
         num_points = 0;
         src.clear(); dst.clear(); next.clear(); prev.clear();
-        twin.clear(); equiv_next.clear();
+        twin.clear(); equiv_next.clear(); prim.clear();
         edge_map.clear();
     }
 };
@@ -104,6 +104,7 @@ static int build_from_faces(HalfEdgeMeshData& M, PyObject* faces_obj, int num_po
         M.dst.resize(M.dst.size() + (size_t)nv);
         M.next.resize(M.next.size() + (size_t)nv);
         M.prev.resize(M.prev.size() + (size_t)nv);
+        M.prim.resize(M.prim.size() + (size_t)nv);
 
         for (int i = 0; i < (int)nv; ++i)
         {
@@ -116,6 +117,7 @@ static int build_from_faces(HalfEdgeMeshData& M, PyObject* faces_obj, int num_po
 
             M.next[(size_t)he] = base + ((i + 1) % (int)nv);
             M.prev[(size_t)he] = base + ((i - 1 + (int)nv) % (int)nv);
+            M.prim[(size_t)he] = (int)fi;
 
             hedges_of[pack_edge(a, b)].push_back(he);
         }
@@ -237,6 +239,7 @@ static int build_from_compact(
         M.dst.resize(M.dst.size() + (size_t)nv);
         M.next.resize(M.next.size() + (size_t)nv);
         M.prev.resize(M.prev.size() + (size_t)nv);
+        M.prim.resize(M.prim.size() + (size_t)nv);
 
         for (int i = 0; i < nv; ++i)
         {
@@ -271,6 +274,7 @@ static int build_from_compact(
 
             M.next[(size_t)he] = base + ((i + 1) % nv);
             M.prev[(size_t)he] = base + ((i - 1 + nv) % nv);
+            M.prim[(size_t)he] = (int)pi;
 
             hedges_of[pack_edge(a, b)].push_back(he);
         }
@@ -487,6 +491,40 @@ static PyObject* HalfEdgeMesh_dst(PyHalfEdgeMesh* self, PyObject* args)
     if (he < 0) return PyLong_FromLong(-1);
 
     return PyLong_FromLong((long)self->m->dst[(size_t)he]);
+}
+
+// prim index of half-edge owner face, or -1
+static PyObject* HalfEdgeMesh_hedge_prim(PyHalfEdgeMesh* self, PyObject* args)
+{
+    int he;
+    if (!PyArg_ParseTuple(args, "i", &he))
+        return nullptr;
+
+    he = clamp_he(self, he);
+    if (he < 0) return PyLong_FromLong(-1);
+
+    return PyLong_FromLong((long)self->m->prim[(size_t)he]);
+}
+
+// (left_prim, right_prim) around undirected edge represented by he.
+// right_prim is the twin owner face, or -1 on boundary.
+static PyObject* HalfEdgeMesh_hedge_prims(PyHalfEdgeMesh* self, PyObject* args)
+{
+    int he;
+    if (!PyArg_ParseTuple(args, "i", &he))
+        return nullptr;
+
+    he = clamp_he(self, he);
+    if (he < 0)
+        return Py_BuildValue("(ii)", -1, -1);
+
+    int left = self->m->prim[(size_t)he];
+    int right = -1;
+    int ht = self->m->twin[(size_t)he];
+    if (ht >= 0)
+        right = self->m->prim[(size_t)ht];
+
+    return Py_BuildValue("(ii)", left, right);
 }
 
 // ---------------------------------------------------------
@@ -1119,6 +1157,8 @@ static PyMethodDef HalfEdgeMesh_methods[] = {
     {"equiv_next",  (PyCFunction)HalfEdgeMesh_equiv_next,  METH_VARARGS, "equiv_next(he)->he or -1"},
     {"src",         (PyCFunction)HalfEdgeMesh_src,         METH_VARARGS, "src(he)->point or -1"},
     {"dst",         (PyCFunction)HalfEdgeMesh_dst,         METH_VARARGS, "dst(he)->point or -1"},
+    {"hedge_prim",  (PyCFunction)HalfEdgeMesh_hedge_prim,  METH_VARARGS, "hedge_prim(he)->prim or -1"},
+    {"hedge_prims", (PyCFunction)HalfEdgeMesh_hedge_prims, METH_VARARGS, "hedge_prims(he)->(left_prim,right_prim)"},
 
     // loops (KEEP THEM)
     {"face_loop",        (PyCFunction)HalfEdgeMesh_face_loop,       METH_VARARGS, "face_loop(he[,max_steps])->list[int]"},
@@ -1194,7 +1234,7 @@ PyMODINIT_FUNC PyInit_skyforge_core(void)
     }
 
     // Build id to confirm correct binary loaded
-    PyModule_AddStringConstant(m, "BUILD_ID", "HalfEdgeMesh_v10_loop_only_valence4");
+    PyModule_AddStringConstant(m, "BUILD_ID", "HalfEdgeMesh_v11_add_hedge_prims");
 
     return m;
 }
