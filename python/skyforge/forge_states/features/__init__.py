@@ -4,6 +4,7 @@ from .preview_feature import PreviewFeature
 from .curve_draw_feature import CurveDrawFeature
 from .curve_edit_feature import CurveEditFeature
 from .curveutils_edit_feature import CurveUtilsEditFeature
+from .hover_gadget_feature import HoverGadgetFeature
 
 __all__ = [
     "AstarTurnFeature",
@@ -12,4 +13,5 @@ __all__ = [
     "CurveDrawFeature",
     "CurveEditFeature",
     "CurveUtilsEditFeature",
+    "HoverGadgetFeature",
 ]
