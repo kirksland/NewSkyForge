@@ -4,8 +4,8 @@ from skyforge.forge_states.base_state import BaseState
 from skyforge.forge_states.tool_context import ToolContext
 from skyforge.forge_states import constants as k
 from skyforge.forge_states.features.preview_feature import PreviewFeature
-from skyforge.forge_states.features.move_feature import MoveFeature
 from skyforge.forge_states.features.curve_draw_feature import CurveDrawFeature
+from skyforge.forge_states.features.curveutils_edit_feature import CurveUtilsEditFeature
 
 
 class State(BaseState):
@@ -16,9 +16,12 @@ class State(BaseState):
         "rows": [
             {"id": "tool_mode", "label": "Tool Mode", "key": "D / M"},
             {"id": "tool_mode_g", "type": "choicegraph", "count": 2},
+            {"id": "edit_target", "label": "Edit Target", "key": "1 / 2 / 3"},
+            {"id": "sel_count", "label": "Selected Points"},
             {"type": "divider"},
             {"label": "Append Point", "key": "LMB (Draw mode)"},
-            {"label": "Move Points", "key": "LMB drag (Move mode)"},
+            {"label": "Select + Drag", "key": "LMB (Move mode)"},
+            {"label": "Add/Remove Select", "key": "Shift + LMB (Move mode)"},
             {"label": "Clear Preview IDs", "key": "C"},
         ],
     }
@@ -34,12 +37,12 @@ class State(BaseState):
 
         self.ctx = ToolContext(self.scene_viewer, state_name=self.state_name)
         self.preview_feature = PreviewFeature(prefix="curve_move_modular", enable_hover=True)
-        self.move_feature = MoveFeature()
         self.curve_draw_feature = CurveDrawFeature()
+        self.curve_edit_feature = CurveUtilsEditFeature()
 
         self.register_feature("preview", self.preview_feature)
-        self.register_feature("move", self.move_feature)
         self.register_feature("curve_draw", self.curve_draw_feature)
+        self.register_feature("curve_edit", self.curve_edit_feature)
 
     def onEnter(self, kwargs):
         self.ctx.set_node(kwargs["node"])
@@ -52,14 +55,14 @@ class State(BaseState):
         self.ctx.tool_mode = k.TOOL_MODE_DRAW
 
         self.preview_feature.on_enter(self.ctx, kwargs)
-        self.move_feature.on_enter(self.ctx, kwargs)
         self.curve_draw_feature.on_enter(self.ctx, kwargs)
+        self.curve_edit_feature.on_enter(self.ctx, kwargs)
         self._setup_hud()
         self._update_hud()
 
     def onExit(self, kwargs):
+        self.curve_edit_feature.on_exit(self.ctx, kwargs)
         self.curve_draw_feature.on_exit(self.ctx, kwargs)
-        self.move_feature.on_exit(self.ctx, kwargs)
         self.preview_feature.on_exit(self.ctx, kwargs)
 
     def onMouseEvent(self, kwargs):
@@ -69,20 +72,28 @@ class State(BaseState):
 
         hit = self.ctx.hit_info(ui_event, geo=self.ctx.edit_geo)
         self.ctx.set_service("hit", hit)
+        self.ctx.set_service("curve_point_ids", list(self.curve_draw_feature.point_ids))
 
         if self.call_feature(self.curve_draw_feature, "on_mouse_event", self.ctx, kwargs):
+            self._update_hud()
+            return True
+
+        if self.call_feature(self.curve_edit_feature, "on_mouse_event", self.ctx, kwargs):
+            self._update_hud()
             return True
 
         self.call_feature(self.preview_feature, "on_mouse_event", self.ctx, kwargs)
-        return bool(self.call_feature(self.move_feature, "on_mouse_event", self.ctx, kwargs))
+        return False
 
     def onDraw(self, kwargs):
-        move_interacting = bool(self.call_feature(self.move_feature, "is_interacting"))
+        move_interacting = bool(getattr(self.curve_edit_feature, "dragging", False))
         changed = self.ctx.sync_edit_geo(force=False, allow_sync=(not move_interacting))
         if changed:
             self.ctx.ensure_mesh(geo=self.ctx.edit_geo)
             self.call_feature(self.preview_feature, "refresh_geometry", self.ctx)
             self.call_feature(self.curve_draw_feature, "refresh_after_sync", self.ctx)
+            self.call_feature(self.curve_edit_feature, "refresh_after_sync", self.ctx)
+            self._update_hud()
 
         self.call_feature(self.preview_feature, "on_draw", self.ctx, kwargs)
 
@@ -105,6 +116,11 @@ class State(BaseState):
             return True
         if key == "c":
             self.curve_draw_feature.clear_curve(self.ctx)
+            self.curve_edit_feature.clear_selection(self.ctx)
+            self._update_hud()
+            return True
+        if self.call_feature(self.curve_edit_feature, "on_key_event", self.ctx, kwargs):
+            self._update_hud()
             return True
         return False
 
@@ -119,6 +135,12 @@ class State(BaseState):
         values = {
             "tool_mode": "DRAW" if is_draw else "MOVE",
             "tool_mode_g": 0 if is_draw else 1,
+            "edit_target": str(getattr(self.curve_edit_feature, "target", "POINT")),
+            "sel_count": str(
+                len(getattr(self.curve_edit_feature, "selected_points", []) or [])
+                + len(getattr(self.curve_edit_feature, "selected_edges", []) or [])
+                + len(getattr(self.curve_edit_feature, "selected_prims", []) or [])
+            ),
         }
         try:
             self.scene_viewer.hudInfo(hud_values=values)

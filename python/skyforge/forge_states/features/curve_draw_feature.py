@@ -1,4 +1,5 @@
 import hou
+import curveutils as cu
 
 from ..feature_base import ViewerFeature
 from .. import constants as k
@@ -17,10 +18,13 @@ class CurveDrawFeature(ViewerFeature):
     def __init__(self):
         self.preview = None
         self.point_ids = []
+        self.picker = cu.curve3DPicker(cu.curve3DPicker.MODE_VIEWPLANE)
         self.ch_points = k.CH_CURVE_POINTS
         self.ch_line = k.CH_CURVE_LINE
 
     def on_enter(self, ctx, kwargs):
+        self.picker.reset()
+        self.picker.setPickMode(cu.curve3DPicker.MODE_VIEWPLANE)
         self.preview = ctx.get_service("preview")
         if self.preview is None:
             return
@@ -81,6 +85,7 @@ class CurveDrawFeature(ViewerFeature):
 
     def clear_curve(self, ctx):
         self.point_ids = []
+        self.picker.reset()
         self._hide(ctx)
 
     def refresh_after_sync(self, ctx):
@@ -132,34 +137,43 @@ class CurveDrawFeature(ViewerFeature):
 
     def _resolve_hit_position(self, ctx, ui_event, hit):
         """
-        Resolve point placement position.
-        Priority:
-        1) scene/geo hit position from intersector
-        2) ray intersection with world Y=0 plane
-        3) short ray fallback in front of camera
+        Resolve point placement via SideFX curve picker behavior.
+        - mode: view plane
+        - plane origin: last placed point when available
+        - honors snapping / construction plane priorities
         """
-        hp = hit.get("hitpos")
-        if hp is not None:
-            return hp
-
         try:
             rpos, rdir = ui_event.ray()
         except Exception:
             return None
 
-        # Intersect world plane Y=0.
+        plane_orig = self._last_point_position(ctx)
         try:
-            eps = 1e-8
-            dy = float(rdir.y())
-            if abs(dy) > eps:
-                t = -float(rpos.y()) / dy
-                if t > 0.0:
-                    return rpos + rdir * t
+            pos = self.picker.intersect(
+                ctx.scene_viewer,
+                rpos,
+                rdir,
+                ui_event=ui_event,
+                plane_orig=plane_orig,
+            )
+            if pos is not None:
+                return hou.Vector3(pos)
         except Exception:
             pass
 
-        # Fallback: fixed distance along ray.
+        # last-resort fallback to avoid dead clicks
+        hp = hit.get("hitpos")
+        if hp is not None:
+            return hou.Vector3(hp)
         try:
             return rpos + rdir * 1.0
         except Exception:
             return None
+
+    def _last_point_position(self, ctx):
+        if ctx.edit_geo is None or not self.point_ids:
+            return None
+        pt = ctx.edit_geo.point(int(self.point_ids[-1]))
+        if pt is None:
+            return None
+        return hou.Vector3(pt.position())
