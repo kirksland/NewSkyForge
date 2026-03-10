@@ -4,6 +4,7 @@ import time
 import hou
 
 from ..feature_base import ViewerFeature
+from ..preview_service import PreviewService
 from ..constants import (
     LINE_WIDTH,
     COLOR_PREVIEW_YELLOW,
@@ -34,6 +35,12 @@ class AstarTurnFeature(ViewerFeature):
         self.start_he = -1
         self.hover_he = -1
         self.preview = ctx.get_service("preview")
+        if self.preview is None:
+            # Keep external injection support: only create service when absent.
+            self.preview = PreviewService(ctx.scene_viewer, prefix="astar_turn")
+            ctx.set_service("preview", self.preview)
+        if self.preview is None:
+            return
         self.preview.ensure_line_channel(
             self.ch_committed,
             COLOR_COMMITTED_ORANGE,
@@ -252,6 +259,8 @@ class AstarTurnFeature(ViewerFeature):
         return None
 
     def _hide_preview(self, ctx):
+        if self.preview is None:
+            return
         self.preview.hide(self.ch_preview)
         self._request_draw(ctx)
 
@@ -262,6 +271,8 @@ class AstarTurnFeature(ViewerFeature):
         self._set_path_to_drawable(ctx, hedges, is_committed=True)
 
     def _set_path_to_drawable(self, ctx, hedges, is_committed):
+        if self.preview is None:
+            return
         ch = self.ch_committed if is_committed else self.ch_preview
         if not hedges or ctx.geometry is None:
             self.preview.hide(ch)
@@ -271,6 +282,8 @@ class AstarTurnFeature(ViewerFeature):
         self._request_draw(ctx)
 
     def _hide_committed(self, ctx):
+        if self.preview is None:
+            return
         self.preview.hide(self.ch_committed)
         self._request_draw(ctx)
 
