@@ -68,23 +68,7 @@ class State(BaseState):
         self.hover_feature.detach(self.ctx, kwargs)
         self.astar_feature.on_exit(self.ctx, kwargs)
 
-    def onMenuAction(self, kwargs):
-        item = kwargs.get("menu_item")
-        if item == "reset_session":
-            self._reset_session()
-            return True
-        if item == "phase_pick_start":
-            self.phase = "pick_start"
-            self.astar_feature.clear_preview(self.ctx)
-            self._set_prompt()
-            self.scene_viewer.curViewport().draw()
-            return True
-        if item == "phase_pick_end":
-            self.phase = "pick_end"
-            self._set_prompt()
-            self.scene_viewer.curViewport().draw()
-            return True
-        return False
+
 
     def onMouseEvent(self, kwargs):
         ui = kwargs.get("ui_event")
@@ -127,9 +111,26 @@ class State(BaseState):
 
     def onDraw(self, kwargs):
         self.hover_feature.draw(self.ctx, kwargs)
-        preview = self.ctx.get_service("preview")
-        if preview is not None:
-            preview.draw_all(kwargs["draw_handle"])
+        self.astar_feature.on_draw(self.ctx, kwargs)
+        
+
+    def onMenuAction(self, kwargs):
+        item = kwargs.get("menu_item")
+        if item == "reset_session":
+            self._reset_session()
+            return True
+        if item == "phase_pick_start":
+            self.phase = "pick_start"
+            self.astar_feature.clear_preview(self.ctx)
+            self._set_prompt()
+            self.scene_viewer.curViewport().draw()
+            return True
+        if item == "phase_pick_end":
+            self.phase = "pick_end"
+            self._set_prompt()
+            self.scene_viewer.curViewport().draw()
+            return True
+        return False
 
 
 def createViewerStateTemplate():

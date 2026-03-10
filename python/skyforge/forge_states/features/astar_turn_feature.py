@@ -67,7 +67,13 @@ class AstarTurnFeature(ViewerFeature):
         self._hide_committed(ctx)
 
     def on_draw(self, ctx, kwargs):
-        return
+        preview = self.preview or ctx.get_service("preview")
+        if preview is None:
+            return
+        draw_handle = kwargs.get("draw_handle")
+        if draw_handle is None:
+            return
+        preview.draw_all(draw_handle)
 
     def on_key_event(self, ctx, kwargs):
         return False
