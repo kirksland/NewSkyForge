@@ -1,152 +1,135 @@
 # Devnote - 2026-03-10
 
 ## Sujet
-Implementation d'une feature plug & play de hover/pick gadget reutilisable dans les viewer states:
-- `python/skyforge/forge_states/features/hover_gadget_feature.py`
-- state de test: `viewerState/hover_gadget_feature_test_state.py`
+API `HoverGadgetFeature` apres simplification du bootstrap (option B) avec integration dans:
+- `viewerState/astar_hover_blend_test_state.py`
 
 ## Objectif
-Avoir un bloc reutilisable qui gere:
-1. hover via `state_context` (`gadget`, `component1`, `component2`)
-2. filtering de visibilite (ray) pour point/edge
-3. preview hover (edge guide + point hover)
-4. retour de payload unifie (pour selection, write parm, chain vers autre feature)
-5. clic simple capture (LMB Start)
+Avoir une feature hover/pick vraiment plug & play dans un state:
+1. setup en un appel
+2. boucle mouse event en un appel
+3. draw en un appel
+4. teardown en un appel
 
-Sans recoder toute la mecanique dans chaque state.
+Sans perdre l'API bas niveau existante.
 
-## API de `HoverGadgetFeature`
-### Construction
+## API publique (haut niveau)
+Fichier: `python/skyforge/forge_states/features/hover_gadget_feature.py`
+
+### `attach(host, ctx, kwargs, geometry=None, mode=None)`
+Fait le bootstrap complet:
+- `bind_host(host)`
+- resolution/assign geometry (argument explicite sinon `kwargs["node"].geometry()`)
+- `set_mode(mode)` si fourni
+- `on_enter(ctx, kwargs)`
+
+Usage:
 ```python
-HoverGadgetFeature(
-    line_gadget="line_gadget",
-    face_gadget="face_gadget",
-    point_gadget="point_gadget",
-    point_hover_gadget="point_hover_gadget",
-    enable_ray_filter=True,
+self.hover_feature.attach(
+    host=self,
+    ctx=self.ctx,
+    kwargs=kwargs,
+    geometry=kwargs["node"].geometry(),
+    mode="face_point",
 )
 ```
 
-### Modes supportes
-- `line`
-- `face`
-- `point`
-- `face_point`
+### `tick(ctx, kwargs) -> (hover_payload, click_payload)`
+Fait une iteration interaction:
+- `on_mouse_event(ctx, kwargs)`
+- retourne `get_hover()`
+- retourne `consume_click()`
 
-### Methodes publiques
-1. `bind_template(template)`
-- Bind les gadgets requis sur le `ViewerStateTemplate`.
+Usage:
+```python
+hover, click = self.hover_feature.tick(self.ctx, kwargs)
+```
 
-2. `bind_host(state)`
-- Branche la feature sur le state (acces `scene_viewer`, `state_gadgets`, `state_context`).
+### `draw(ctx, kwargs)`
+Alias de `on_draw(ctx, kwargs)`.
 
-3. `set_geometry(geo)`
-- Definit la geometrie source pour pick/visibilite.
+### `detach(ctx, kwargs)`
+Alias de `on_exit(ctx, kwargs)`.
 
-4. `set_mode(mode)`
-- Change le mode actif (`line`, `face`, `point`, `face_point`).
+## API bas niveau (toujours disponible)
+Aucune suppression:
+- `bind_template(template)`
+- `bind_host(state)`
+- `set_geometry(geo)`
+- `set_mode(mode)`
+- `on_enter / on_mouse_event / on_draw / on_exit`
+- `get_hover()`
+- `consume_click()`
+- `clear()`
 
-5. `on_enter(ctx, kwargs)`
-- Setup complet (bind gadgets, geometry, params, visibilite mode).
-
-6. `on_mouse_event(ctx, kwargs)`
-- Lit le hover gadget courant.
-- Applique les filtres visibility.
-- Met a jour les overlays.
-- Capture un clic simple (LMB Start) dans un buffer interne.
-
-7. `on_draw(ctx, kwargs)`
-- Draw gadgets actifs + preview edge hover.
-
-8. `on_exit(ctx, kwargs)`
-- Reset/hide.
-
-9. `get_hover()`
-- Retourne un dict normalise:
+## Payload retour
+`hover_payload` (via `get_hover`) conserve le format:
 ```python
 {
-  "gadget": str|None,
+  "gadget": str | None,
   "c1": int,
   "c2": int,
   "visible": bool,
-  "point": int,    # -1 si N/A
-  "edge": (int,int)|None,
-  "prim": int,     # -1 si N/A
+  "point": int,
+  "edge": (int, int) | None,
+  "prim": int,
 }
 ```
 
-10. `consume_click()`
-- Retourne le dernier payload clic capture (ou `None`) et le consomme.
-
-11. `clear()`
-- Reset explicite des etats hover/click + visuals.
+`click_payload` est `None` ou un snapshot du hover au moment du clic LMB Start.
 
 ## Integration type dans un state
-```python
-from skyforge.forge_states.features import HoverGadgetFeature
+Extrait simplifie (pattern actuel):
 
+```python
 class State(object):
     def __init__(self, state_name, scene_viewer):
         self.scene_viewer = scene_viewer
-        self.mode = "face_point"
         self.hover_feature = HoverGadgetFeature(enable_ray_filter=True)
-        self.hover_feature.bind_host(self)
+        self.mode = "line"
 
     def onEnter(self, kwargs):
-        geo = kwargs["node"].geometry()
-        self.hover_feature.bind_host(self)
-        self.hover_feature.set_geometry(geo)
-        self.hover_feature.set_mode(self.mode)
-        self.hover_feature.on_enter(self.ctx, kwargs)
+        self.hover_feature.attach(
+            host=self,
+            ctx=self.ctx,
+            kwargs=kwargs,
+            geometry=kwargs["node"].geometry(),
+            mode=self.mode,
+        )
 
     def onMouseEvent(self, kwargs):
-        self.hover_feature.on_mouse_event(self.ctx, kwargs)
-        hover = self.hover_feature.get_hover()
-        click = self.hover_feature.consume_click()
+        hover, click = self.hover_feature.tick(self.ctx, kwargs)
+        # logique metier (A* start/end, write parm, etc.)
         return False
 
     def onDraw(self, kwargs):
-        self.hover_feature.on_draw(self.ctx, kwargs)
+        self.hover_feature.draw(self.ctx, kwargs)
 
-
-def createViewerStateTemplate():
-    template = hou.ViewerStateTemplate(...)
-    template.bindFactory(State)
-    HoverGadgetFeature.bind_template(template)
-    return template
+    def onExit(self, kwargs):
+        self.hover_feature.detach(self.ctx, kwargs)
 ```
 
-## Mecanique face (etat valide actuel)
-- Le hover face est pilote par `face_gadget` + `indices`.
-- Reset agressif applique quand pas de face valide:
-```python
-self.face_gadget.setParams({"indices": []})
-```
-- Les params auto de locate/pick face sont coupes pour eviter les cas de full overlay global pendant transitions.
+## Cas A* (ce qu'on vient de valider)
+Dans `astar_hover_blend_test_state.py`:
+1. `tick()` fournit le hover courant pour preview edge
+2. `click_payload` permet de distinguer et stocker:
+- clic 1 -> `start_edge`
+- clic 2 -> `end_edge`
+3. la machine d'etat (`pick_start` / `pick_end`) reste dans le state metier
+4. la feature reste responsable uniquement de hover/pick/preview
 
-## Diff principale avec `face_gadget_test_state`
-- `face_gadget_test_state.py` est un state "lab" monolithique.
-- `HoverGadgetFeature` encapsule la meme logique dans une API reutilisable.
-- Le state test `hover_gadget_feature_test_state.py` montre une integration minimale en deleguant setup/hover/draw a la feature.
+## Pourquoi ce decoupage est utile
+- Le state ne gere plus le boilerplate gadget.
+- La logique metier (A*, selection, param assignment) reste lisible.
+- On peut encore basculer sur l'API bas niveau si un state a des besoins speciaux.
 
-## Points de vigilance
-1. Les params gadget (`draw_color`, `locate_color`, `pick_color`, `indices`) sont sensibles:
-- un `locate_color` face non nul peut donner une teinte globale selon transitions.
+## Limites actuelles
+1. La feature ne remplace pas la logique metier (state machine, validation domaine).
+2. Le ray-filter est surtout pertinent pour point/edge visibles.
+3. Les reglages couleur/params gadget restent sensibles et doivent etre testes par mode.
 
-2. Toujours reset les channels non actifs:
-- face: `indices: []`
-- point hover: `indices: []`
-
-3. Filtre ray:
-- utile pour point/edge "au travers".
-- face actuellement geree par validite context + prim existence (comportement stable cote state lab).
-
-## Fichiers concernes
+## Fichiers lies
 - `python/skyforge/forge_states/features/hover_gadget_feature.py`
-- `python/skyforge/forge_states/features/__init__.py`
+- `viewerState/astar_hover_blend_test_state.py`
 - `viewerState/hover_gadget_feature_test_state.py`
-- `viewerState/face_gadget_test_state.py` (reference labo)
-
-## Etat actuel
-- Feature operationnelle en test state.
-- API utilisable pour brancher facilement hover/pick vers selection, parm set, ou chain vers autres features.
+- `viewerState/face_gadget_test_state.py` (reference comportement)

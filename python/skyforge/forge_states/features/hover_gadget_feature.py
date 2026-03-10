@@ -76,6 +76,54 @@ class HoverGadgetFeature(ViewerFeature):
     # ------------------------------------------------------------------
     # External setup (plug-and-play)
     # ------------------------------------------------------------------
+    def attach(self, host, ctx, kwargs, geometry=None, mode=None):
+        """
+        High-level bootstrap helper for states.
+        Equivalent to:
+        - bind_host(host)
+        - set_geometry(...)
+        - set_mode(...)
+        - on_enter(ctx, kwargs)
+        """
+        self.bind_host(host)
+
+        geo = geometry
+        if geo is None and ctx is not None:
+            geo = getattr(ctx, "edit_geo", None)
+            if geo is None:
+                geo = getattr(ctx, "geometry", None)
+        if geo is None:
+            node = kwargs.get("node") if isinstance(kwargs, dict) else None
+            if node is not None:
+                try:
+                    geo = node.geometry()
+                except Exception:
+                    geo = None
+
+        if geo is not None:
+            self.set_geometry(geo)
+        if mode is not None:
+            self.set_mode(mode)
+
+        self.on_enter(ctx, kwargs)
+        return self
+
+    def tick(self, ctx, kwargs):
+        """
+        High-level runtime helper.
+        Returns (hover_payload, click_payload_or_None).
+        """
+        self.on_mouse_event(ctx, kwargs)
+        return self.get_hover(), self.consume_click()
+
+    def draw(self, ctx, kwargs):
+        """High-level draw alias."""
+        self.on_draw(ctx, kwargs)
+
+    def detach(self, ctx, kwargs):
+        """High-level teardown alias."""
+        self.on_exit(ctx, kwargs)
+
     def bind_host(self, host_state):
         """
         Bind the viewer state instance (must expose `state_gadgets` and `state_context`).

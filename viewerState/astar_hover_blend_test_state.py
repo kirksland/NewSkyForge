@@ -53,16 +53,19 @@ class State(BaseState):
 
         self.astar_feature.on_enter(self.ctx, kwargs)
 
-        self.hover_feature.bind_host(self)
-        self.hover_feature.set_geometry(self.ctx.geometry)
-        self.hover_feature.set_mode(HoverGadgetFeature.MODE_LINE)
-        self.hover_feature.on_enter(self.ctx, kwargs)
+        self.hover_feature.attach(
+            host=self,
+            ctx=self.ctx,
+            kwargs=kwargs,
+            geometry=self.ctx.geometry,
+            mode=HoverGadgetFeature.MODE_LINE,
+        )
 
         self.phase = "pick_start"
         self._set_prompt()
 
     def onExit(self, kwargs):
-        self.hover_feature.on_exit(self.ctx, kwargs)
+        self.hover_feature.detach(self.ctx, kwargs)
         self.astar_feature.on_exit(self.ctx, kwargs)
 
     def onMenuAction(self, kwargs):
@@ -91,8 +94,7 @@ class State(BaseState):
         # Keep topology fresh if geometry changes.
         self.ctx.ensure_mesh(geo=self.ctx.geometry)
 
-        self.hover_feature.on_mouse_event(self.ctx, kwargs)
-        hover = self.hover_feature.get_hover()
+        hover, click = self.hover_feature.tick(self.ctx, kwargs)
 
         # Live preview while selecting end edge.
         if self.phase == "pick_end":
@@ -106,7 +108,6 @@ class State(BaseState):
             else:
                 self.astar_feature.clear_preview(self.ctx)
 
-        click = self.hover_feature.consume_click()
         if click and click.get("visible") and click.get("edge") is not None:
             p0, p1 = click["edge"]
             he = self.ctx.edge_to_hedge(int(p0), int(p1))
@@ -125,7 +126,7 @@ class State(BaseState):
         return False
 
     def onDraw(self, kwargs):
-        self.hover_feature.on_draw(self.ctx, kwargs)
+        self.hover_feature.draw(self.ctx, kwargs)
         preview = self.ctx.get_service("preview")
         if preview is not None:
             preview.draw_all(kwargs["draw_handle"])
