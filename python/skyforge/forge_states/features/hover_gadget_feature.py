@@ -240,8 +240,8 @@ class HoverGadgetFeature(ViewerFeature):
                 self.line_gadget.setParams(
                     {
                         "draw_color": [1.0, 0.0, 0.0, 0.0],
-                        "locate_color": [1.0, 0.0, 0.0, 1.0],
-                        "pick_color": [1.0, 1.0, 0.0, 1.0],
+                        "locate_color": [1.0, 0.0, 0.0, 0.0],
+                        "pick_color": [1.0, 1.0, 0.0, 0.0],
                         "line_width": 4.0,
                     }
                 )
