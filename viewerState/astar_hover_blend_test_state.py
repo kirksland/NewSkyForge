@@ -3,7 +3,6 @@ import viewerstate.utils as su
 
 from skyforge.forge_states.base_state import BaseState
 from skyforge.forge_states.tool_context import ToolContext
-from skyforge.forge_states.features.preview_feature import PreviewFeature
 from skyforge.forge_states.features.astar_turn_feature import AstarTurnFeature
 from skyforge.forge_states.features.hover_gadget_feature import HoverGadgetFeature
 
@@ -21,7 +20,6 @@ class State(BaseState):
         self.state_name = state_name
 
         self.ctx = ToolContext(self.scene_viewer, state_name=self.state_name)
-        self.preview_feature = PreviewFeature(prefix="astar_hover_blend_test", enable_hover=False)
         self.hover_feature = HoverGadgetFeature(enable_ray_filter=True)
         self.astar_feature = AstarTurnFeature()
 
@@ -53,7 +51,6 @@ class State(BaseState):
         self.ctx.geometry = node.geometry() if node is not None else None
         self.ctx.ensure_mesh(geo=self.ctx.geometry)
 
-        self.preview_feature.on_enter(self.ctx, kwargs)
         self.astar_feature.on_enter(self.ctx, kwargs)
 
         self.hover_feature.bind_host(self)
@@ -67,7 +64,6 @@ class State(BaseState):
     def onExit(self, kwargs):
         self.hover_feature.on_exit(self.ctx, kwargs)
         self.astar_feature.on_exit(self.ctx, kwargs)
-        self.preview_feature.on_exit(self.ctx, kwargs)
 
     def onMenuAction(self, kwargs):
         item = kwargs.get("menu_item")
@@ -130,7 +126,9 @@ class State(BaseState):
 
     def onDraw(self, kwargs):
         self.hover_feature.on_draw(self.ctx, kwargs)
-        self.preview_feature.on_draw(self.ctx, kwargs)
+        preview = self.ctx.get_service("preview")
+        if preview is not None:
+            preview.draw_all(kwargs["draw_handle"])
 
 
 def createViewerStateTemplate():
@@ -163,4 +161,3 @@ def createViewerStateTemplate():
     template.bindHotkeyDefinitions(hotkeys)
     template.bindIcon("$SK_ICONS/devtools.svg")
     return template
-
