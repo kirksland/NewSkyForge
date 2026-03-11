@@ -21,6 +21,7 @@ class HoverGadgetFeature(ViewerFeature):
     MODE_FACE = "face"
     MODE_POINT = "point"
     MODE_FACE_POINT = "face_point"
+    MODE_ORDER = (MODE_LINE, MODE_POINT, MODE_FACE, MODE_FACE_POINT)
 
     def __init__(
         self,
@@ -41,6 +42,7 @@ class HoverGadgetFeature(ViewerFeature):
         self.scene_viewer = None
         self.geometry = None
         self.mode = self.MODE_LINE
+        self.allowed_modes = set(self.MODE_ORDER)
 
         self.state_gadgets = {}
         self.line_gadget = None
@@ -73,6 +75,27 @@ class HoverGadgetFeature(ViewerFeature):
             "point_hover_gadget",
             label="Point Hover",
         )
+
+    @staticmethod
+    def build_menu(state_typename, state_label=None, include_cycle=True):
+        """Create a ViewerStateMenu with hover mode actions."""
+        label = state_label or state_typename or "Hover"
+        menu = hou.ViewerStateMenu(state_typename + "_hover_menu", label + " Hover")
+        menu.addActionItem("hover_mode_point", "Hover: Point")
+        menu.addActionItem("hover_mode_edge", "Hover: Edge")
+        menu.addActionItem("hover_mode_face", "Hover: Face")
+        menu.addActionItem("hover_mode_face_point", "Hover: Face+Point")
+        if include_cycle:
+            menu.addSeparator()
+            menu.addActionItem("hover_mode_cycle", "Hover: Cycle Mode")
+        return menu
+
+    @staticmethod
+    def install_menu(template, state_typename, state_label=None, include_cycle=True):
+        """Create and bind a hover mode menu onto the template."""
+        menu = HoverGadgetFeature.build_menu(state_typename, state_label, include_cycle=include_cycle)
+        template.bindMenu(menu)
+        return menu
 
     # ------------------------------------------------------------------
     # External setup (plug-and-play)
@@ -138,9 +161,49 @@ class HoverGadgetFeature(ViewerFeature):
     def set_mode(self, mode):
         """Set active gadget mode: line, face, point, or face_point."""
         mode_txt = str(mode or "").strip().lower()
-        if mode_txt in (self.MODE_LINE, self.MODE_FACE, self.MODE_POINT, self.MODE_FACE_POINT):
+        if mode_txt in self.MODE_ORDER and mode_txt in self.allowed_modes:
             self.mode = mode_txt
         self._apply_mode_visibility()
+
+    def set_allowed_modes(self, modes):
+        """Limit which hover modes can be selected."""
+        allowed = set()
+        for m in modes or []:
+            mt = str(m or "").strip().lower()
+            if mt in self.MODE_ORDER:
+                allowed.add(mt)
+        if not allowed:
+            allowed = set(self.MODE_ORDER)
+        self.allowed_modes = allowed
+        if self.mode not in self.allowed_modes:
+            self.mode = self._next_allowed(self.MODE_LINE)
+        self._apply_mode_visibility()
+
+    def cycle_mode(self):
+        """Cycle to the next allowed hover mode."""
+        self.mode = self._next_allowed(self.mode)
+        self._apply_mode_visibility()
+        return self.mode
+
+    def handle_menu_action(self, kwargs):
+        """Handle hover mode menu actions from a ViewerState."""
+        action = kwargs.get("menu_item")
+        if action == "hover_mode_point":
+            self.set_mode(self.MODE_POINT)
+            return True
+        if action == "hover_mode_edge":
+            self.set_mode(self.MODE_LINE)
+            return True
+        if action == "hover_mode_face":
+            self.set_mode(self.MODE_FACE)
+            return True
+        if action == "hover_mode_face_point":
+            self.set_mode(self.MODE_FACE_POINT)
+            return True
+        if action == "hover_mode_cycle":
+            self.cycle_mode()
+            return True
+        return False
 
     def set_geometry(self, geo):
         """Assign geometry used by gadgets and visibility tests."""
@@ -355,6 +418,19 @@ class HoverGadgetFeature(ViewerFeature):
             self.point_gadget.draw(draw_handle)
         if self.hover.get("point", -1) >= 0 and self.point_hover_gadget is not None:
             self.point_hover_gadget.draw(draw_handle)
+
+    def _next_allowed(self, current):
+        order = list(self.MODE_ORDER)
+        if not order:
+            return self.MODE_LINE
+        if current not in order:
+            current = order[0]
+        start = order.index(current)
+        for i in range(1, len(order) + 1):
+            cand = order[(start + i) % len(order)]
+            if cand in self.allowed_modes:
+                return cand
+        return current
 
     def _apply_mode_visibility(self):
         try:

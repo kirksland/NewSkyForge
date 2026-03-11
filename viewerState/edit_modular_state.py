@@ -70,6 +70,9 @@ class State(BaseState):
     def onDraw(self, kwargs):
         self.hover_feature.draw(self.ctx, kwargs)
 
+    def onMenuAction(self, kwargs):
+        return bool(self.hover_feature.handle_menu_action(kwargs))
+
     def _setup_hud(self):
         try:
             self.scene_viewer.hudInfo(template=self.HUD_TEMPLATE)
@@ -85,5 +88,6 @@ def createViewerStateTemplate():
     template = hou.ViewerStateTemplate(state_typename, state_label, state_cat)
     template.bindFactory(State)
     HoverGadgetFeature.bind_template(template)
+    HoverGadgetFeature.install_menu(template, state_typename, state_label)
     template.bindIcon("$SK_ICONS/devtools.svg")
     return template
