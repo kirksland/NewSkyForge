@@ -30,6 +30,7 @@ class HoverGadgetFeature(ViewerFeature):
         point_hover_gadget="point_hover_gadget",
         enable_ray_filter=True,
     ):
+        """Initialize gadget names and runtime hover state."""
         self.line_gadget_name = str(line_gadget)
         self.face_gadget_name = str(face_gadget)
         self.point_gadget_name = str(point_gadget)
@@ -135,24 +136,29 @@ class HoverGadgetFeature(ViewerFeature):
         self._ensure_drawables()
 
     def set_mode(self, mode):
+        """Set active gadget mode: line, face, point, or face_point."""
         mode_txt = str(mode or "").strip().lower()
         if mode_txt in (self.MODE_LINE, self.MODE_FACE, self.MODE_POINT, self.MODE_FACE_POINT):
             self.mode = mode_txt
         self._apply_mode_visibility()
 
     def set_geometry(self, geo):
+        """Assign geometry used by gadgets and visibility tests."""
         self.geometry = geo
         self._apply_geometry()
 
     def get_hover(self):
+        """Return a copy of the normalized hover payload."""
         return dict(self.hover)
 
     def consume_click(self):
+        """Return and clear the last LMB click payload captured by `tick`."""
         out = self._last_click
         self._last_click = None
         return out
 
     def clear(self):
+        """Reset hover/click payloads and clear hover visuals."""
         self.hover = {
             "gadget": None,
             "c1": -1,
@@ -170,6 +176,7 @@ class HoverGadgetFeature(ViewerFeature):
     # Feature API
     # ------------------------------------------------------------------
     def on_enter(self, ctx, kwargs):
+        """Bind gadgets, resolve geometry, setup params, and apply mode visibility."""
         self.scene_viewer = getattr(ctx, "scene_viewer", self.scene_viewer)
         self._ensure_drawables()
 
@@ -192,12 +199,14 @@ class HoverGadgetFeature(ViewerFeature):
         self._apply_mode_visibility()
 
     def on_exit(self, ctx, kwargs):
+        """Clear state and hide all gadgets/drawables."""
         self.clear()
         self._hide_all_gadgets()
         if self.hover_edge_drawable is not None:
             self.hover_edge_drawable.show(False)
 
     def on_mouse_event(self, ctx, kwargs):
+        """Update hover payload/visuals from gadget context and capture LMB clicks."""
         ui = kwargs.get("ui_event")
         sc = self._state_context()
         if ui is None or sc is None:
@@ -231,6 +240,7 @@ class HoverGadgetFeature(ViewerFeature):
         return False
 
     def on_draw(self, ctx, kwargs):
+        """Draw active gadgets and optional edge hover guide."""
         dh = kwargs["draw_handle"]
         self._draw_active_gadgets(dh)
         if self.hover_edge_drawable is None:

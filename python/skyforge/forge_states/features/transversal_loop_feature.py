@@ -17,9 +17,17 @@ from ..constants import (
 
 
 class TransversalLoopFeature(ViewerFeature):
+    """
+    Transversal loop feature for edge-based loop preview/commit.
+
+    Owns two preview channels:
+    - `ch_preview`: live loop preview
+    - `ch_committed`: committed loop written to `grstr`
+    """
     name = "transversal_loop"
 
     def __init__(self):
+        """Initialize runtime mode, output mode, and preview channel names."""
         self.preview = None
         self.ch_preview = CH_LOOP_PREVIEW
         self.ch_committed = CH_LOOP_COMMITTED
@@ -27,6 +35,7 @@ class TransversalLoopFeature(ViewerFeature):
         self.output_mode = OUTPUT_MODE_EDGE
 
     def on_enter(self, ctx, kwargs):
+        """Initialize/reuse preview service and ensure loop channels exist."""
         self.preview = ctx.get_service("preview")
         if self.preview is None:
             # Keep external injection support: only create service when absent.
@@ -47,17 +56,19 @@ class TransversalLoopFeature(ViewerFeature):
         print("[SkyForge] TransversalLoopFeature mode:", self.mode, "(R=roll, Q=quad, X=toggle)")
 
     def on_exit(self, ctx, kwargs):
+        """Hide loop preview and committed channels."""
         self._hide_preview(ctx)
         self._hide_committed(ctx)
 
     def on_draw(self, ctx, kwargs):
+        """Draw only loop owned channels on the shared preview service."""
         preview = self.preview or ctx.get_service("preview")
         if preview is None:
             return
         draw_handle = kwargs.get("draw_handle")
         if draw_handle is None:
             return
-        preview.draw_all(draw_handle)
+        preview.draw_channels(draw_handle, (self.ch_preview, self.ch_committed))
 
     def on_key_event(self, ctx, kwargs):
         ui = kwargs.get("ui_event")
@@ -85,12 +96,15 @@ class TransversalLoopFeature(ViewerFeature):
 
     # Public API used by pyd_loop_modular orchestrator
     def clear_preview(self, ctx):
+        """Clear loop preview channel only."""
         self._hide_preview(ctx)
 
     def reset_all(self, ctx):
+        """Reset loop session state and clear related group parms/channels."""
         self._reset_session(ctx)
 
     def set_output_mode(self, mode):
+        """Set commit output mode: edge, point, or prim."""
         self.output_mode = (mode or OUTPUT_MODE_EDGE).lower().strip()
 
     def set_basegroup_from_edge(self, ctx, p0, p1):
@@ -107,6 +121,7 @@ class TransversalLoopFeature(ViewerFeature):
         return True
 
     def preview_loop_from_he(self, ctx, he):
+        """Compute and display loop preview for a target half-edge."""
         if he < 0:
             self._hide_preview(ctx)
             return False
@@ -126,6 +141,7 @@ class TransversalLoopFeature(ViewerFeature):
         return self.preview_loop_from_he(ctx, he)
 
     def commit_loop_from_he(self, ctx, he):
+        """Commit loop from target half-edge into parm string and channel."""
         if he < 0:
             return False
         p0 = int(ctx.mesh.src(int(he)))
@@ -145,6 +161,7 @@ class TransversalLoopFeature(ViewerFeature):
         return self.commit_loop_from_he(ctx, he)
 
     def commit_from_hover(self, ctx, hover):
+        """Convenience wrapper to commit from normalized hover payload."""
         he = self._hedge_from_hover(ctx, hover)
         return self.commit_loop_from_he(ctx, he)
 

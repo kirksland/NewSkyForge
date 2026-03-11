@@ -239,6 +239,19 @@ class PreviewService:
         for ch in self._channels.values():
             ch["drawable"].show(False)
 
+    def draw_channel(self, handle, name):
+        """Draw one channel by name on the given draw handle."""
+        ch = self._channels.get(str(name))
+        if ch is not None:
+            ch["drawable"].draw(handle)
+
+    def draw_channels(self, handle, names):
+        """Draw a list of channels by name on the given draw handle."""
+        if names is None:
+            return
+        for name in names:
+            self.draw_channel(handle, name)
+
     def draw_all(self, handle):
         """Draw all channels on the given draw handle."""
         for ch in self._channels.values():

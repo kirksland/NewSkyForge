@@ -18,9 +18,17 @@ from ..constants import (
 
 
 class AstarTurnFeature(ViewerFeature):
+    """
+    A* edge path feature.
+
+    Owns two preview channels:
+    - `ch_preview`: live path while hovering target edge
+    - `ch_committed`: committed path written to `grstr`
+    """
     name = "astar_turn"
 
     def __init__(self):
+        """Initialize runtime state, output mode, and preview channel names."""
         self.start_he = -1
         self.hover_he = -1
         self.committed_hedges = []
@@ -32,6 +40,7 @@ class AstarTurnFeature(ViewerFeature):
         self._last_commit_t = 0.0
 
     def on_enter(self, ctx, kwargs):
+        """Initialize/reuse preview service and sync initial committed/base state."""
         self.start_he = -1
         self.hover_he = -1
         self.preview = ctx.get_service("preview")
@@ -63,29 +72,34 @@ class AstarTurnFeature(ViewerFeature):
                 self.start_he = ctx.edge_to_hedge(p0, p1)
 
     def on_exit(self, ctx, kwargs):
+        """Hide preview and committed channels."""
         self._hide_preview(ctx)
         self._hide_committed(ctx)
 
     def on_draw(self, ctx, kwargs):
+        """Draw only A* owned channels on the shared preview service."""
         preview = self.preview or ctx.get_service("preview")
         if preview is None:
             return
         draw_handle = kwargs.get("draw_handle")
         if draw_handle is None:
             return
-        preview.draw_all(draw_handle)
+        preview.draw_channels(draw_handle, (self.ch_preview, self.ch_committed))
 
     def on_key_event(self, ctx, kwargs):
         return False
 
     # Public API for orchestrator-driven interactions
     def clear_preview(self, ctx):
+        """Clear live preview channel only."""
         self._hide_preview(ctx)
 
     def reset_all(self, ctx):
+        """Reset internal state and clear related group parms/channels."""
         self._reset_session(ctx)
 
     def set_output_mode(self, mode):
+        """Set commit output mode: edge, point, or prim."""
         self.output_mode = (mode or OUTPUT_MODE_EDGE).lower().strip()
 
     def preview_single_edge(self, ctx, he):
@@ -96,6 +110,7 @@ class AstarTurnFeature(ViewerFeature):
         return True
 
     def preview_from_base_to_he(self, ctx, end_he):
+        """Compute and display A* path from basegroup edge to target half-edge."""
         start_he = self._start_from_basegroup(ctx)
         if start_he < 0 or end_he < 0 or start_he == end_he:
             self._hide_preview(ctx)
@@ -110,6 +125,7 @@ class AstarTurnFeature(ViewerFeature):
         return True
 
     def commit_from_base_to_he(self, ctx, end_he):
+        """Commit A* path to parm string and update chain start/basegroup."""
         start_he = self._start_from_basegroup(ctx)
         if end_he < 0:
             return False

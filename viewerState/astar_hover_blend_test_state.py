@@ -146,6 +146,7 @@ class State(BaseState):
     def onDraw(self, kwargs):
         self.hover_feature.draw(self.ctx, kwargs)
         self.astar_feature.on_draw(self.ctx, kwargs)
+        self.loop_feature.on_draw(self.ctx, kwargs)
         
 
     def onMenuAction(self, kwargs):
