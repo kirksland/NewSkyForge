@@ -4,12 +4,11 @@ import hou
 import viewerstate.utils as su
 import skyforge.skyforge_core as core
 
-from .base_context import BaseContext
 from . import constants as k
 from skyforge import forge_store as store
 
 
-class ToolContext(BaseContext):
+class ToolContext:
     """
     Unified runtime context for modular viewer states.
     Supports:
@@ -18,7 +17,10 @@ class ToolContext(BaseContext):
     """
 
     def __init__(self, scene_viewer, state_name=""):
-        super().__init__(scene_viewer=scene_viewer, state_name=state_name)
+        self.scene_viewer = scene_viewer
+        self.state_name = state_name or ""
+        self.node = None
+        self.services = {}
 
         # Shared parms/state
         self.parm_string = None  # usually grstr
@@ -45,8 +47,16 @@ class ToolContext(BaseContext):
 
     def set_node(self, node):
         """Bind Houdini node and cache frequently used parms."""
-        super().set_node(node)
+        self.node = node
         self.parm_string = node.parm(k.PARM_GRSTR) if node is not None else None
+
+    def set_service(self, name, service):
+        if not name:
+            return
+        self.services[str(name)] = service
+
+    def get_service(self, name, default=None):
+        return self.services.get(str(name), default)
 
     # ------------------------------------------------------------------
     # Half-edge / pick helpers
