@@ -65,8 +65,10 @@ class State(BaseState):
         if ui is None:
             return False
 
-        self.ctx.ensure_geo()
-        self.ctx.ensure_mesh(geo=self.ctx.edit_geo)
+        if self.move_feature.drag_active:
+            return bool(self.move_feature.on_mouse_event(self.ctx, kwargs))
+
+
 
         consumed = bool(self.hub.mouse(self.ctx, kwargs, stop_on_consume=False))
         self.ctx.set_service("hover", self.hover_feature.get_hover())

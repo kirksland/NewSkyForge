@@ -29,11 +29,9 @@ def reload_package(prefix: str) -> None:
             print(f"[reload:FAILED] {name} -> {e}")
 
 
-def reload_skyforge(include_legacy_sforge: bool = False) -> None:
+def reload_skyforge() -> None:
     """
     Reload the new SkyForge python package (skyforge).
-    Optionally reload legacy 'sForge' too.
+    Reload the SkyForge python package (skyforge).
     """
     reload_package("skyforge")
-    if include_legacy_sforge:
-        reload_package("sForge")

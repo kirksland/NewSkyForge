@@ -1,5 +1,6 @@
 import hou
 import curveutils as cu
+import time
 
 from skyforge import forge_mesh as mesh
 from ..feature_base import ViewerFeature
@@ -25,6 +26,9 @@ class HoverMoveFeature(ViewerFeature):
         self.last_world_pos = None
         self.drag_ptnums = []
         self._undo_opened = False
+        self._last_push_time = 0.0
+        self._pending_push = False
+        self.push_interval = 0.05  # seconds (50 ms)
 
     def on_enter(self, ctx, kwargs):
         self.picker.reset()
@@ -117,8 +121,8 @@ class HoverMoveFeature(ViewerFeature):
 
         mesh.apply_delta_to_points(ctx.edit_geo, self.drag_ptnums, delta)
         mesh.touch_point_positions(ctx.edit_geo)
-        ctx.push_edit_geo()
-        ctx.ensure_mesh(geo=ctx.edit_geo)
+        self._pending_push = True
+        self._maybe_push(ctx)
 
         self.last_world_pos = hou.Vector3(cur)
         return True
@@ -131,11 +135,13 @@ class HoverMoveFeature(ViewerFeature):
         self.last_world_pos = None
         self.drag_ptnums = []
         if commit and self._undo_opened:
+            self._force_push(ctx)
             try:
                 ctx.scene_viewer.endStateUndo()
             except Exception:
                 pass
         self._undo_opened = False
+        self._pending_push = False
 
     def _get_hover(self, ctx, kwargs):
         hover = kwargs.get("hover")
@@ -181,3 +187,18 @@ class HoverMoveFeature(ViewerFeature):
             return pts or [], origin
 
         return [], None
+
+    def _maybe_push(self, ctx):
+        if not self._pending_push:
+            return
+        now = time.perf_counter()
+        if (now - self._last_push_time) < float(self.push_interval):
+            return
+        self._force_push(ctx)
+
+    def _force_push(self, ctx):
+        if not self._pending_push:
+            return
+        ctx.push_edit_geo()
+        self._last_push_time = time.perf_counter()
+        self._pending_push = False
