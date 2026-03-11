@@ -4,7 +4,6 @@ import viewerstate.utils as su
 from skyforge.forge_states.base_state import BaseState
 from skyforge.forge_states.tool_context import ToolContext
 from skyforge.forge_states import constants as k
-from skyforge.forge_states.features.move_feature import MoveFeature
 from skyforge.forge_states.features.preview_feature import PreviewFeature
 
 
@@ -27,16 +26,13 @@ class State(BaseState):
     STASH_NODE_NAME = k.DEFAULT_STASH_NODE_NAME
     INPUT_NODE_NAME = k.DEFAULT_INPUT_NODE_NAME
     ENABLE_PREVIEW_FEATURE = True
-    ENABLE_MOVE_FEATURE = True
+    ENABLE_MOVE_FEATURE = False
 
     def __init__(self, state_name, scene_viewer):
         super().__init__(scene_viewer=scene_viewer, state_name=state_name)
         self.ctx = ToolContext(scene_viewer, state_name=state_name)
 
-        self.move_feature = MoveFeature()
         self.preview_feature = PreviewFeature(prefix="auto_axis_mod", enable_hover=True)
-        if self.ENABLE_MOVE_FEATURE:
-            self.register_feature("move", self.move_feature)
         if self.ENABLE_PREVIEW_FEATURE:
             self.register_feature("preview", self.preview_feature)
 
