@@ -6,6 +6,7 @@ from .curve_edit_feature import CurveEditFeature
 from .curveutils_edit_feature import CurveUtilsEditFeature
 from .hover_gadget_feature import HoverGadgetFeature
 from .hover_move_feature import HoverMoveFeature
+from .hover_draw_feature import HoverDrawFeature
 
 __all__ = [
     "AstarTurnFeature",
@@ -16,4 +17,5 @@ __all__ = [
     "CurveUtilsEditFeature",
     "HoverGadgetFeature",
     "HoverMoveFeature",
+    "HoverDrawFeature",
 ]

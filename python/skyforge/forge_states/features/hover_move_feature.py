@@ -3,6 +3,7 @@ import curveutils as cu
 
 from skyforge import forge_mesh as mesh
 from ..feature_base import ViewerFeature
+from .. import constants as k
 
 
 class HoverMoveFeature(ViewerFeature):
@@ -36,6 +37,9 @@ class HoverMoveFeature(ViewerFeature):
     def on_mouse_event(self, ctx, kwargs):
         ui = kwargs.get("ui_event")
         if ui is None:
+            return False
+
+        if str(getattr(ctx, "tool_mode", "")).upper() != k.AUTO_AXIS_TOOL_ORDER[0]:
             return False
 
         if ctx.edit_geo is None:
