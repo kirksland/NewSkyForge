@@ -2,6 +2,7 @@ import re
 import hou
 
 from ..feature_base import ViewerFeature
+from ..preview_service import PreviewService
 from ..constants import (
     LINE_WIDTH,
     COLOR_PREVIEW_YELLOW,
@@ -27,6 +28,12 @@ class TransversalLoopFeature(ViewerFeature):
 
     def on_enter(self, ctx, kwargs):
         self.preview = ctx.get_service("preview")
+        if self.preview is None:
+            # Keep external injection support: only create service when absent.
+            self.preview = PreviewService(ctx.scene_viewer, prefix="transversal_loop")
+            ctx.set_service("preview", self.preview)
+        if self.preview is None:
+            return
         self.preview.ensure_line_channel(
             self.ch_preview,
             COLOR_PREVIEW_YELLOW,
@@ -44,7 +51,13 @@ class TransversalLoopFeature(ViewerFeature):
         self._hide_committed(ctx)
 
     def on_draw(self, ctx, kwargs):
-        return
+        preview = self.preview or ctx.get_service("preview")
+        if preview is None:
+            return
+        draw_handle = kwargs.get("draw_handle")
+        if draw_handle is None:
+            return
+        preview.draw_all(draw_handle)
 
     def on_key_event(self, ctx, kwargs):
         ui = kwargs.get("ui_event")
@@ -93,21 +106,47 @@ class TransversalLoopFeature(ViewerFeature):
         self._set_preview_path(ctx, [he])
         return True
 
-    def commit_loop_from_edge(self, ctx, p0, p1):
-        he = ctx.edge_to_hedge(p0, p1)
+    def preview_loop_from_he(self, ctx, he):
         if he < 0:
+            self._hide_preview(ctx)
             return False
-
-        self._set_basegroup_from_points(ctx, p0, p1)
-        path = self._compute_loop(ctx, he)
+        path = self._compute_loop(ctx, int(he))
         if not path:
             self._hide_preview(ctx)
             return False
+        self._set_preview_path(ctx, path)
+        return True
 
+    def preview_loop_from_edge(self, ctx, p0, p1):
+        he = ctx.edge_to_hedge(p0, p1)
+        return self.preview_loop_from_he(ctx, he)
+
+    def preview_from_hover(self, ctx, hover):
+        he = self._hedge_from_hover(ctx, hover)
+        return self.preview_loop_from_he(ctx, he)
+
+    def commit_loop_from_he(self, ctx, he):
+        if he < 0:
+            return False
+        p0 = int(ctx.mesh.src(int(he)))
+        p1 = int(ctx.mesh.dst(int(he)))
+        self._set_basegroup_from_points(ctx, p0, p1)
+        path = self._compute_loop(ctx, int(he))
+        if not path:
+            self._hide_preview(ctx)
+            return False
         self._set_committed_path(ctx, path)
         if ctx.parm_string is not None:
             ctx.parm_string.set(ctx.hedges_to_group_string_mode(path, self.output_mode))
         return True
+
+    def commit_loop_from_edge(self, ctx, p0, p1):
+        he = ctx.edge_to_hedge(p0, p1)
+        return self.commit_loop_from_he(ctx, he)
+
+    def commit_from_hover(self, ctx, hover):
+        he = self._hedge_from_hover(ctx, hover)
+        return self.commit_loop_from_he(ctx, he)
 
     def on_selection(self, ctx, kwargs):
         ui = kwargs.get("ui_event")
@@ -196,10 +235,14 @@ class TransversalLoopFeature(ViewerFeature):
         return None
 
     def _hide_preview(self, ctx):
+        if self.preview is None:
+            return
         self.preview.hide(self.ch_preview)
         self._request_draw(ctx)
 
     def _hide_committed(self, ctx):
+        if self.preview is None:
+            return
         self.preview.hide(self.ch_committed)
         self._request_draw(ctx)
 
@@ -210,6 +253,8 @@ class TransversalLoopFeature(ViewerFeature):
         self._set_path(ctx, hedges, committed=True)
 
     def _set_path(self, ctx, hedges, committed):
+        if self.preview is None:
+            return
         channel = self.ch_committed if committed else self.ch_preview
         if not hedges or ctx.geometry is None:
             self.preview.hide(channel)
@@ -250,3 +295,11 @@ class TransversalLoopFeature(ViewerFeature):
         except Exception:
             key = (dev.keyString() or "").lower()
             return "shift" in key
+
+    def _hedge_from_hover(self, ctx, hover):
+        if not hover or not hover.get("visible"):
+            return -1
+        edge = hover.get("edge")
+        if edge is None:
+            return -1
+        return ctx.edge_to_hedge(int(edge[0]), int(edge[1]))

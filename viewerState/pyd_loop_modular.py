@@ -3,7 +3,11 @@ import hou
 from skyforge.forge_states.tool_context import ToolContext
 from skyforge.forge_states.base_state import BaseState
 from skyforge.forge_states import constants as k
-from skyforge.forge_states.features import AstarTurnFeature, TransversalLoopFeature, PreviewFeature
+from skyforge.forge_states.features import (
+    AstarTurnFeature,
+    HoverGadgetFeature,
+    TransversalLoopFeature,
+)
 
 
 class State(BaseState):
@@ -33,10 +37,10 @@ class State(BaseState):
         super().__init__(scene_viewer=self.scene_viewer, state_name=self.state_name)
 
         self.ctx = ToolContext(self.scene_viewer, state_name=self.state_name)
-        self.preview_feature = PreviewFeature(prefix="pyd_loop_modular", enable_hover=False)
+        self.hover_feature = HoverGadgetFeature(enable_ray_filter=True)
         self.astar_feature = AstarTurnFeature()
         self.loop_feature = TransversalLoopFeature()
-        self.register_feature("preview", self.preview_feature)
+        self.register_feature("hover_gadget", self.hover_feature)
         self.register_feature("astar_turn", self.astar_feature)
         self.register_feature("transversal_loop", self.loop_feature)
 
@@ -47,21 +51,28 @@ class State(BaseState):
         self.ctx.set_node(kwargs["node"])
         self.ctx.ensure_geo()
         self.ctx.ensure_mesh()
-        self.preview_feature.on_enter(self.ctx, kwargs)
         self.astar_feature.on_enter(self.ctx, kwargs)
         self.loop_feature.on_enter(self.ctx, kwargs)
+        self.hover_feature.attach(
+            host=self,
+            ctx=self.ctx,
+            kwargs=kwargs,
+            geometry=self.ctx.geometry,
+            mode=HoverGadgetFeature.MODE_LINE,
+        )
         self.astar_feature.clear_preview(self.ctx)
         self._apply_output_mode()
         self._setup_hud()
         self._update_hud()
 
     def onExit(self, kwargs):
+        self.hover_feature.detach(self.ctx, kwargs)
         self.astar_feature.on_exit(self.ctx, kwargs)
         self.loop_feature.on_exit(self.ctx, kwargs)
-        self.preview_feature.on_exit(self.ctx, kwargs)
 
     def onDraw(self, kwargs):
-        self.preview_feature.on_draw(self.ctx, kwargs)
+        self.hover_feature.draw(self.ctx, kwargs)
+        self.astar_feature.on_draw(self.ctx, kwargs)
 
     def onKeyEvent(self, kwargs):
         ui = kwargs.get("ui_event")
@@ -117,17 +128,18 @@ class State(BaseState):
             return False
 
         self.ctx.ensure_mesh()
+        hover, _click = self.hover_feature.tick(self.ctx, kwargs)
         dev = ui.device()
         reason = ui.reason()
+        he = self._hover_hedge(hover)
+        edge = hover.get("edge") if hover.get("visible") else None
 
         # SHIFT+A hover => preview A*
         if reason == hou.uiEventReason.Located:
             if self._shift_a_active and self._is_shift_down(dev):
-                hit = self.ctx.hit_edge(ui)
-                if hit is None:
+                if he < 0:
                     self.astar_feature.clear_preview(self.ctx)
                     return False
-                _p0, _p1, he = hit
                 self.astar_feature.preview_from_base_to_he(self.ctx, he)
                 return False
 
@@ -142,13 +154,12 @@ class State(BaseState):
         if not (is_lmb or is_mmb):
             return False
 
-        hit = self.ctx.hit_edge(ui)
-        if hit is None:
+        if he < 0 or edge is None:
             self._reset_all()
             self._update_hud()
             return True
 
-        p0, p1, he = hit
+        p0, p1 = int(edge[0]), int(edge[1])
         shift = self.is_shift_down(dev)
 
         # Shift+A + LMB => commit astar to grstr
@@ -159,7 +170,7 @@ class State(BaseState):
 
         # Shift + MMB => loop commit to grstr
         if is_mmb and shift:
-            consumed = bool(self.loop_feature.commit_loop_from_edge(self.ctx, p0, p1))
+            consumed = bool(self.loop_feature.commit_loop_from_he(self.ctx, he))
             self._update_hud()
             return consumed
 
@@ -225,6 +236,14 @@ class State(BaseState):
         # Compatibility shim for older internal calls.
         return self.is_shift_down(dev)
 
+    def _hover_hedge(self, hover):
+        if not hover or not hover.get("visible"):
+            return -1
+        edge = hover.get("edge")
+        if edge is None:
+            return -1
+        return self.ctx.edge_to_hedge(int(edge[0]), int(edge[1]))
+
 
 def createViewerStateTemplate():
     state_typename = "pyd_loop_modular"
@@ -233,6 +252,7 @@ def createViewerStateTemplate():
 
     template = hou.ViewerStateTemplate(state_typename, state_label, state_cat)
     template.bindFactory(State)
+    HoverGadgetFeature.bind_template(template)
     template.bindIcon("$SK_ICONS/devtools.svg")
 
     return template
