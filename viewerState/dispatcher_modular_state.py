@@ -35,7 +35,7 @@ class State(BaseState):
         self.move_feature = HoverMoveFeature()
 
         self.hud_hub = FeatureHub([self.hover_feature, self.move_feature])
-        self.hub = FeatureHub([self.move_feature])
+        self.hub = FeatureHub([self.hover_feature, self.move_feature])
 
         self.register_feature("hover_gadget", self.hover_feature)
         self.register_feature("hover_move", self.move_feature)
@@ -68,10 +68,9 @@ class State(BaseState):
         self.ctx.ensure_geo()
         self.ctx.ensure_mesh(geo=self.ctx.edit_geo)
 
-        hover, _click = self.hover_feature.tick(self.ctx, kwargs)
-        self.ctx.set_service("hover", hover)
-
-        return bool(self.hub.mouse(self.ctx, kwargs, stop_on_consume=False))
+        consumed = bool(self.hub.mouse(self.ctx, kwargs, stop_on_consume=False))
+        self.ctx.set_service("hover", self.hover_feature.get_hover())
+        return consumed
 
     def onDraw(self, kwargs):
         self.hover_feature.draw(self.ctx, kwargs)
