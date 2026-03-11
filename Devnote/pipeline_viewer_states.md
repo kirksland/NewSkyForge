@@ -1,95 +1,70 @@
-Pipeline Viewer States: Architecture et mise en place (guide debutant)
+## Pipeline Viewer States
 
-Pourquoi ce pipeline existe
-L'objectif est simple: rendre les viewer states predictibles, modulaires et faciles a faire evoluer.
-On veut eviter les etats "magiques" ou tout est melange.
-Le pipeline impose une structure claire pour:
-- comprendre ce qui se passe
-- ajouter une nouvelle interaction sans casser le reste
-- garder une execution stable
+Overview
+This pipeline defines a predictable architecture for Houdini viewer states.
+Its goals are:
+- clear execution order
+- modular, composable interactions
+- minimal duplication across states
 
-Le modele mental
-Imagine un atelier:
-1. Le state est le chef d'atelier.
-2. Le contexte est l'etabli (memoire de travail).
-3. Les actions sont des outils qu'on branche sur l'etabli.
-Le chef decide l'ordre, l'etabli garde les infos, les outils font le travail.
-
-Architecture globale
-Le pipeline se decoupe en 3 couches:
+## Architecture
+The system is organized in three layers:
 1. Orchestration (state)
 2. Runtime (context)
-3. Actions (briques modulaires)
+3. Actions (modules)
 
-1. Orchestration (state)
-Le state est la seule piece qui connait Houdini.
-Il ne fait pas le travail lui-meme, mais il decide quand le travail se fait.
-Ses responsabilites:
-- initialiser le contexte
-- preparer la geometrie editable
-- definir l'ordre d'execution
-- deleguer les actions
-- gerer le cycle de vie (enter, draw, event, exit)
+## Orchestration (State)
+The state is responsible for:
+- creating and owning the runtime context
+- initializing editable geometry
+- enforcing execution order
+- delegating to action modules
+- managing lifecycle (enter / draw / events / exit)
 
-2. Runtime (context)
-Le contexte est une memoire partagée.
-Il contient:
-- le node
-- le scene viewer
-- la geo editable
-- les services partages entre les briques
-Il permet aux actions de communiquer sans se coupler directement entre elles.
+## Runtime (Context)
+The context provides shared runtime data:
+- scene viewer, node, and editable geometry
+- shared services for cross‑module data exchange
+It is the single source of truth for the current session.
 
-3. Actions (briques modulaires)
-Les actions sont des modules simples.
-Chaque action fait une chose precise (ex: hover, move, preview, commit).
-Le state choisit quelles actions sont actives.
+Actions (Modules)
+Action modules implement isolated behavior (hover, draw, move, commit, preview).
+They are assembled by the state and executed in a defined order.
 
-Cycle d'execution (vue simple)
-Chaque state suit toujours la meme logique:
+## Execution Flow
 1. Setup (onEnter)
-   - creation du contexte
-   - creation de la geo editable
-   - initialisation des actions actives
-
-2. Interaction (events)
-   - lecture du contexte (hover, selection, etc.)
-   - application d'une action a partir de cet etat
-
-3. Rendu (onDraw)
-   - dessins de guides ou previews
-
+   - create context
+   - create/editable geometry
+   - initialize actions
+2. Interaction (onMouseEvent / onKeyEvent)
+   - compute base interaction state (hover/selection)
+   - consume that state in action modules
+3. Render (onDraw)
+   - draw visual feedback and previews
 4. Cleanup (onExit)
-   - detacher / nettoyer
+   - detach and clear runtime state
 
-Le principe cle: ordre et stabilite
-Si une action depend d'une info, elle doit passer APRES la production de cette info.
-C'est le state qui garantit cet ordre.
-Exemple: une action de move doit passer apres la production d'un hover.
+Ordering Rules
+Ordering is critical:
+- a module that consumes hover must run after hover is produced
+- geometry sync must not interrupt a drag
+The state guarantees this order.
 
-Dispatcher optionnel
-Pour eviter de repeter les appels, on peut utiliser un dispatcher:
-- il appelle automatiquement les hooks des actions
-- il ne remplace pas l'orchestration
-Le state reste responsable de l'ordre critique.
+## Optional Dispatcher
+A dispatcher can be used to reduce boilerplate by routing events to modules.
+It does not replace orchestration; the state still controls ordering.
 
-Mini tutorial: creer un nouveau state
-1. Creer le contexte runtime.
-2. Preparer la geo editable.
-3. Brancher une action qui produit l'etat de base (hover/selection).
-4. Brancher les actions qui consomment cet etat (move/commit/etc).
-5. En event:
-   - produire l'etat de base
-   - appeler les actions dependantes
-6. En draw:
-   - afficher les feedbacks
+## HUD Guidance
+The pipeline supports modular HUD fragments.
+Modules can expose small HUD fragments; states assemble them into a single HUD.
 
-Bonnes pratiques
-- Garder le state fin: orchestration seulement.
-- Garder les actions petites et testables.
-- Centraliser la production d'un etat de base (hover/selection).
-- Ne pas synchroniser la geo en plein drag.
-- Donner un feedback clair a l'utilisateur (HUD, guides).
+Recommended Workflow (New State)
+1. Create context and editable geometry.
+2. Attach a hover/selection module (base interaction state).
+3. Attach action modules that consume that state.
+4. Ensure correct ordering in onMouseEvent.
+5. Provide minimal HUD guidance (mode + keys).
 
-Ce document reste volontairement conceptuel.
-Les details d'implementation sont documentes ailleurs.
+Notes
+This document is intentionally high‑level.
+Implementation details live in separate feature documentation.

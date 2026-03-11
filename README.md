@@ -1,105 +1,73 @@
-﻿<img src="config/icons/newForge4-white.svg" alt="SkyForge Icon" width="350">
+﻿**Development Architecture for Advanced Houdini Tools**
 
-# SkyForge
+SkyForge is a structured development framework built on top of **SideFX Houdini**, designed to support the creation of complex, interactive, and technically robust tools.
 
-Framework de developpement d'outils Houdini avances, centre sur la modularite des viewer states, la logique topo reusable, et une architecture propre pour iterer vite sans casser les outils existants.
 
----
+> How do you design advanced, user-friendly, technically controlled tools inside Houdini without fighting architectural limitations And monolitic script?
 
-## Intention du package
+# Pipeline Viewer States
 
-SkyForge n'essaie pas de remplacer Houdini.
+## Overview
+This pipeline defines a predictable architecture for Houdini viewer states.
+Its goals are:
+- clear execution order
+- modular, composable interactions
+- minimal duplication across states
 
-SkyForge sert a construire, tester et faire evoluer des outils interactifs complexes avec une base technique stable:
-- interactions viewport claires (viewer states)
-- logique topo deterministic (Python/C++)
-- services partages (preview, context runtime, stash/edit geo)
-- UI tools (menus/palettes) pour exposer les workflows
+## Architecture
+The system is organized in three layers:
+1. Orchestration (state)
+2. Runtime (context)
+3. Actions (modules)
 
-Objectif: reduire le code ad-hoc et augmenter la reutilisation.
+## Orchestration (State)
+The state is responsible for:
+- creating and owning the runtime context
+- initializing editable geometry
+- enforcing execution order
+- delegating to action modules
+- managing lifecycle (enter / draw / events / exit)
 
----
+## Runtime (Context)
+The context provides shared runtime data:
+- scene viewer, node, and editable geometry
+- shared services for cross‑module data exchange
+It is the single source of truth for the current session.
 
-## Philosophie
+Actions (Modules)
+Action modules implement isolated behavior (hover, draw, move, commit, preview).
+They are assembled by the state and executed in a defined order.
 
-1. Separation nette des responsabilites
-- un state orchestre
-- une feature fait une tache metier
-- un service gere l'infra technique (ex: drawables)
+## Execution Flow
+1. Setup (onEnter)
+   - create context
+   - create/editable geometry
+   - initialize actions
+2. Interaction (onMouseEvent / onKeyEvent)
+   - compute base interaction state (hover/selection)
+   - consume that state in action modules
+3. Render (onDraw)
+   - draw visual feedback and previews
+4. Cleanup (onExit)
+   - detach and clear runtime state
 
-2. Composition plutot que monolithe
-- les outils se construisent en assemblant des features
-- les features communiquent via un context commun standardise
+Ordering Rules
+Ordering is critical:
+- a module that consumes hover must run after hover is produced
+- geometry sync must not interrupt a drag
+The state guarantees this order.
 
-3. Compatibilite progressive
-- on peut migrer un outil par petites etapes
-- on limite les regressions en gardant des couches simples et testables
+## Optional Dispatcher
+A dispatcher can be used to reduce boilerplate by routing events to modules.
+It does not replace orchestration; the state still controls ordering.
 
-4. Source de verite unique
-- constantes centralisees
-- channels preview centralises
-- conversions topo centralisees
+## HUD Guidance
+The pipeline supports modular HUD fragments.
+Modules can expose small HUD fragments; states assemble them into a single HUD.
 
----
-
-## Architecture (vue rapide)
-
-### Viewer State Layer
-Dans `viewerState/`:
-- states orchestrateurs (`pyd_loop_modular`, `auto_axis_modular`, etc.)
-- routing des events Houdini (key/mouse/draw)
-- HUD et interactions utilisateur
-
-### Modular Runtime Layer
-Dans `python/skyforge/forge_states/`:
-- `base_state.py`: orchestrateur minimal
-- `tool_context.py`: contexte runtime partage (node, geo, mesh, hit, parms)
-- `feature_base.py`: contrat de feature
-- `preview_service.py`: drawables multi-channels
-- `features/`: briques metier (A*, loop, move, curve draw...)
-- `constants.py`: constantes runtime/style/channels
-
-### Core Topology Layer
-Dans `cpp/skyforge_core/` + binding Python:
-- HalfEdgeMesh
-- loops / A* turn
-- helpers topologiques performants
-- API stable exposee au Python
-
-### Tool UI Layer
-Dans `python/skyforge/forge_tools/`:
-- menus et palettes d'outils (ex: custom palette, simple menu)
-
----
-
-## Ce que ce repo apporte concretement
-
-- prototypage rapide de nouvelles features viewport
-- reuse de code entre plusieurs viewer states
-- pipeline plus lisible pour passer de test -> outil robuste
-- base evolutive pour modeling / retopo / operations topologiques
-
----
-
-## Etat actuel
-
-Le socle modulaire est actif et exploitable:
-- features composables
-- preview channels unifies
-- context standardise
-- tests de composition entre features deja en place (ex: A* -> Move)
-
-La roadmap continue sur:
-- enrichissement des features
-- UX viewport
-- robustesse des workflows multi-outils
-
----
-
-## Documentation interne
-
-- [Coding Convention](Coding-Conventions)
-- [Roadmap](Roadmap)
-- [MODULAR_STATE_API](MODULAR_STATE_API.md)
-- [MODULAR_STATE_TUTORIAL](MODULAR_STATE_TUTORIAL.md)
-- [WIKI_ASTAR_MOVE_COMPOSITION](WIKI_ASTAR_MOVE_COMPOSITION.md)
+Recommended Workflow (New State)
+1. Create context and editable geometry.
+2. Attach a hover/selection module (base interaction state).
+3. Attach action modules that consume that state.
+4. Ensure correct ordering in onMouseEvent.
+5. Provide minimal HUD guidance (mode + keys).
