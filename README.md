@@ -71,3 +71,6 @@ Recommended Workflow (New State)
 3. Attach action modules that consume that state.
 4. Ensure correct ordering in onMouseEvent.
 5. Provide minimal HUD guidance (mode + keys).
+
+Wiki
+https://github.com/kirksland/NewSkyForge/wiki
