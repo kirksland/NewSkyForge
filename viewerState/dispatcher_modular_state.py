@@ -2,19 +2,21 @@ import hou
 
 from skyforge.forge_states.base_state import BaseState
 from skyforge.forge_states.tool_context import ToolContext
+from skyforge.forge_states.feature_hub import FeatureHub
 from skyforge.forge_states.features import HoverGadgetFeature, HoverMoveFeature
 
 
 class State(BaseState):
     """
-    Minimal modular state to test hover-driven move.
+    Dispatcher test state:
+    - Uses FeatureHub to dispatch feature callbacks.
     - Hover via gadgets (point/edge/face).
     - LMB drag moves hovered element points.
     """
 
     HUD_TEMPLATE = {
-        "title": "EditModular",
-        "desc": "hover move test",
+        "title": "DispatcherModular",
+        "desc": "feature hub test",
         "icon": "$SK_ICONS/devtools.svg",
         "rows": [
             {"label": "Hover Point/Edge/Face"},
@@ -25,13 +27,15 @@ class State(BaseState):
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
         self.scene_viewer = kwargs["scene_viewer"]
-        self.state_name = kwargs.get("state_name", "edit_modular_state")
+        self.state_name = kwargs.get("state_name", "dispatcher_modular_state")
         super().__init__(scene_viewer=self.scene_viewer, state_name=self.state_name)
 
         self.ctx = ToolContext(self.scene_viewer, state_name=self.state_name)
         self.hover_feature = HoverGadgetFeature(enable_ray_filter=True)
         self.move_feature = HoverMoveFeature()
-        self.debug = False
+
+        self.hud_hub = FeatureHub([self.hover_feature, self.move_feature])
+        self.hub = FeatureHub([self.move_feature])
 
         self.register_feature("hover_gadget", self.hover_feature)
         self.register_feature("hover_move", self.move_feature)
@@ -46,15 +50,15 @@ class State(BaseState):
             ctx=self.ctx,
             kwargs=kwargs,
             geometry=self.ctx.edit_geo,
-            mode=HoverGadgetFeature.MODE_FACE_POINT,
+            mode=HoverGadgetFeature.MODE_POINT,
         )
-        self.move_feature.on_enter(self.ctx, kwargs)
+        self.hub.enter(self.ctx, kwargs)
         self._setup_hud()
         self._update_hud()
 
     def onExit(self, kwargs):
         self.hover_feature.detach(self.ctx, kwargs)
-        self.move_feature.on_exit(self.ctx, kwargs)
+        self.hub.exit(self.ctx, kwargs)
 
     def onMouseEvent(self, kwargs):
         ui = kwargs.get("ui_event")
@@ -66,10 +70,12 @@ class State(BaseState):
 
         hover, _click = self.hover_feature.tick(self.ctx, kwargs)
         self.ctx.set_service("hover", hover)
-        return bool(self.move_feature.on_mouse_event(self.ctx, kwargs))
+
+        return bool(self.hub.mouse(self.ctx, kwargs, stop_on_consume=False))
 
     def onDraw(self, kwargs):
         self.hover_feature.draw(self.ctx, kwargs)
+        self.hub.draw(self.ctx, kwargs)
         self._update_hud()
 
     def onMenuAction(self, kwargs):
@@ -81,7 +87,7 @@ class State(BaseState):
     def _setup_hud(self):
         try:
             rows = list(self.HUD_TEMPLATE.get("rows") or [])
-            rows.extend(self.hover_feature.hud_template())
+            rows.extend(self.hud_hub.hud_template())
             template = dict(self.HUD_TEMPLATE)
             template["rows"] = rows
             self.scene_viewer.hudInfo(template=template)
@@ -90,7 +96,7 @@ class State(BaseState):
 
     def _update_hud(self):
         try:
-            values = self.hover_feature.hud_values(self.ctx)
+            values = self.hud_hub.hud_values(self.ctx)
             if values:
                 self.scene_viewer.hudInfo(hud_values=values)
         except Exception:
@@ -98,8 +104,8 @@ class State(BaseState):
 
 
 def createViewerStateTemplate():
-    state_typename = "edit_modular_state"
-    state_label = "edit_modular_state"
+    state_typename = "dispatcher_modular_state"
+    state_label = "dispatcher_modular_state"
     state_cat = hou.sopNodeTypeCategory()
 
     template = hou.ViewerStateTemplate(state_typename, state_label, state_cat)

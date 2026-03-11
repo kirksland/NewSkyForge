@@ -21,7 +21,7 @@ class HoverGadgetFeature(ViewerFeature):
     MODE_FACE = "face"
     MODE_POINT = "point"
     MODE_FACE_POINT = "face_point"
-    MODE_ORDER = (MODE_LINE, MODE_POINT, MODE_FACE, MODE_FACE_POINT)
+    MODE_ORDER = (MODE_LINE, MODE_POINT, MODE_FACE)
 
     def __init__(
         self,
@@ -77,24 +77,65 @@ class HoverGadgetFeature(ViewerFeature):
         )
 
     @staticmethod
-    def build_menu(state_typename, state_label=None, include_cycle=True):
+    def build_menu(state_typename, state_label=None, include_cycle=True, hotkeys=None):
         """Create a ViewerStateMenu with hover mode actions."""
         label = state_label or state_typename or "Hover"
         menu = hou.ViewerStateMenu(state_typename + "_hover_menu", label + " Hover")
-        menu.addActionItem("hover_mode_point", "Hover: Point")
-        menu.addActionItem("hover_mode_edge", "Hover: Edge")
-        menu.addActionItem("hover_mode_face", "Hover: Face")
-        menu.addActionItem("hover_mode_face_point", "Hover: Face+Point")
+        menu.addActionItem("hover_mode_point", "Hover: Point", hotkeys.get("hover_mode_point") if hotkeys else None)
+        menu.addActionItem("hover_mode_edge", "Hover: Edge", hotkeys.get("hover_mode_edge") if hotkeys else None)
+        menu.addActionItem("hover_mode_face", "Hover: Face", hotkeys.get("hover_mode_face") if hotkeys else None)
         if include_cycle:
             menu.addSeparator()
-            menu.addActionItem("hover_mode_cycle", "Hover: Cycle Mode")
+            menu.addActionItem("hover_mode_cycle", "Hover: Cycle Mode", hotkeys.get("hover_mode_cycle") if hotkeys else None)
         return menu
 
     @staticmethod
+    def build_hotkeys(definitions, state_typename):
+        """Register hotkey context + defaults for hover mode actions."""
+        key_context = "h.pane.gview.state.sop.{0}".format(state_typename)
+        key_category = "h.pane.gview.state.sop.{0}".format(state_typename)
+
+        if not definitions.containsContext(key_context):
+            definitions.addContext(
+                key_context,
+                "{0} Operation".format(state_typename),
+                "Keys for {0} viewer state.".format(state_typename),
+            )
+        if not definitions.containsCommandCategory(key_category):
+            definitions.addCommandCategory(
+                key_category,
+                "{0} Operation".format(state_typename),
+                "Commands for {0} viewer state.".format(state_typename),
+            )
+
+        def _cmd(name, label, desc, default_keys):
+            symbol = key_category + "." + name
+            if not definitions.containsCommand(symbol):
+                definitions.addCommand(symbol, label, desc)
+            if default_keys:
+                definitions.addDefaultBinding(key_context, symbol, default_keys)
+            return symbol
+
+        return {
+            "hover_mode_point": _cmd("hover_mode_point", "Hover: Point", "Hover mode: point", ["&"]),
+            "hover_mode_edge": _cmd("hover_mode_edge", "Hover: Edge", "Hover mode: edge", ["é"]),
+            "hover_mode_face": _cmd("hover_mode_face", "Hover: Face", "Hover mode: face", ["\""]),
+            "hover_mode_cycle": _cmd("hover_mode_cycle", "Hover: Cycle Mode", "Hover mode: cycle", []),
+        }
+
+    @staticmethod
     def install_menu(template, state_typename, state_label=None, include_cycle=True):
-        """Create and bind a hover mode menu onto the template."""
-        menu = HoverGadgetFeature.build_menu(state_typename, state_label, include_cycle=include_cycle)
+        """Create and bind a hover mode menu + hotkeys onto the template."""
+        hotkey_defs = hou.PluginHotkeyDefinitions()
+        hotkeys = HoverGadgetFeature.build_hotkeys(hotkey_defs, state_typename)
+        menu = HoverGadgetFeature.build_menu(
+            state_typename,
+            state_label,
+            include_cycle=include_cycle,
+            hotkeys=hotkeys,
+        )
         template.bindMenu(menu)
+        template.bindHotkeyDefinitions(hotkey_defs)
         return menu
 
     # ------------------------------------------------------------------
@@ -197,13 +238,55 @@ class HoverGadgetFeature(ViewerFeature):
         if action == "hover_mode_face":
             self.set_mode(self.MODE_FACE)
             return True
-        if action == "hover_mode_face_point":
-            self.set_mode(self.MODE_FACE_POINT)
-            return True
         if action == "hover_mode_cycle":
             self.cycle_mode()
             return True
         return False
+
+    def on_menu_pre_open(self, kwargs):
+        """Enable/disable menu items based on allowed modes."""
+        menu_id = kwargs.get("menu")
+        if not menu_id or not str(menu_id).endswith("_hover_menu"):
+            return False
+
+        menu_item_states = kwargs.get("menu_item_states")
+        if not isinstance(menu_item_states, dict):
+            return False
+
+        menu_item_states["hover_mode_point"]["enable"] = self.MODE_POINT in self.allowed_modes
+        menu_item_states["hover_mode_edge"]["enable"] = self.MODE_LINE in self.allowed_modes
+        menu_item_states["hover_mode_face"]["enable"] = self.MODE_FACE in self.allowed_modes
+        # Cycle is only meaningful when at least 2 modes are allowed.
+        menu_item_states["hover_mode_cycle"]["enable"] = len(self.allowed_modes) > 1
+        return True
+
+
+    # ------------------------------------------------------------------
+    # HUD helpers (optional)
+    # ------------------------------------------------------------------
+    def hud_template(self):
+        return [
+            {"id": "hover_mode", "label": "Hover Mode"},
+            {"id": "hover_mode_keys", "label": "Mode Keys"},
+        ]
+
+    def hud_values(self, ctx=None):
+        label = {
+            self.MODE_LINE: "Edge",
+            self.MODE_POINT: "Point",
+            self.MODE_FACE: "Face",
+        }.get(self.mode, "Edge")
+        key_map = {
+            self.MODE_POINT: "&",
+            self.MODE_LINE: "é",
+            self.MODE_FACE: "\"",
+        }
+        keys = [key_map[m] for m in self.MODE_ORDER if m in self.allowed_modes]
+        keys_txt = " / ".join(keys) if keys else "-"
+        return {
+            "hover_mode": label,
+            "hover_mode_keys": keys_txt,
+        }
 
     def set_geometry(self, geo):
         """Assign geometry used by gadgets and visibility tests."""
