@@ -9,7 +9,6 @@ from ..constants import (
     COLOR_COMMITTED_ORANGE,
     LOOP_MODE_ROLL,
     LOOP_MODE_QUAD,
-    GROUP_PARM_NAMES,
     OUTPUT_MODE_EDGE,
     CH_LOOP_PREVIEW,
     CH_LOOP_COMMITTED,
@@ -22,7 +21,7 @@ class TransversalLoopFeature(ViewerFeature):
 
     Owns two preview channels:
     - `ch_preview`: live loop preview
-    - `ch_committed`: committed loop written to `grstr`
+    - `ch_committed`: committed loop (payload output)
     """
     name = "transversal_loop"
 
@@ -53,7 +52,7 @@ class TransversalLoopFeature(ViewerFeature):
             COLOR_COMMITTED_ORANGE,
             line_width=float(LINE_WIDTH),
         )
-        print("[SkyForge] TransversalLoopFeature mode:", self.mode, "(R=roll, Q=quad, X=toggle)")
+
 
     def on_exit(self, ctx, kwargs):
         """Hide loop preview and committed channels."""
@@ -71,28 +70,118 @@ class TransversalLoopFeature(ViewerFeature):
         preview.draw_channels(draw_handle, (self.ch_preview, self.ch_committed))
 
     def on_key_event(self, ctx, kwargs):
-        ui = kwargs.get("ui_event")
-        if ui is None:
-            return False
+        return False
 
-        dev = ui.device()
-        if dev.isAutoRepeat():
-            return False
+    # ------------------------------------------------------------------
+    # Menu + hotkeys
+    # ------------------------------------------------------------------
+    @staticmethod
+    def build_hotkeys(definitions, state_typename):
+        """Register hotkey context + defaults for loop mode actions."""
+        key_context = "h.pane.gview.state.sop.{0}".format(state_typename)
+        key_category = "h.pane.gview.state.sop.{0}".format(state_typename)
 
-        key = (dev.keyString() or "").lower()
-        if key in ("r", "&"):
+        if not definitions.containsContext(key_context):
+            definitions.addContext(
+                key_context,
+                "{0} Operation".format(state_typename),
+                "Keys for {0} viewer state.".format(state_typename),
+            )
+        if not definitions.containsCommandCategory(key_category):
+            definitions.addCommandCategory(
+                key_category,
+                "{0} Operation".format(state_typename),
+                "Commands for {0} viewer state.".format(state_typename),
+            )
+
+        def _cmd(name, label, desc, default_keys):
+            symbol = key_category + "." + name
+            if not definitions.containsCommand(symbol):
+                definitions.addCommand(symbol, label, desc)
+            if default_keys:
+                definitions.addDefaultBinding(key_context, symbol, default_keys)
+            return symbol
+
+        return {
+            "loop_mode_roll": _cmd("loop_mode_roll", "Loop Mode: Roll", "Loop mode: roll", ["r"]),
+            "loop_mode_quad": _cmd("loop_mode_quad", "Loop Mode: Quad", "Loop mode: quad", ["q"]),
+            "loop_mode_toggle": _cmd("loop_mode_toggle", "Loop Mode: Toggle", "Loop mode: toggle", ["x"]),
+        }
+
+    @staticmethod
+    def build_menu(state_typename, state_label=None, hotkeys=None):
+        """Create a ViewerStateMenu with loop mode actions."""
+        label = state_label or state_typename or "Loop"
+        menu = hou.ViewerStateMenu(state_typename + "_loop_menu", label + " Loop")
+        menu.addActionItem("loop_mode_roll", "Loop Mode: Roll", hotkeys.get("loop_mode_roll") if hotkeys else None)
+        menu.addActionItem("loop_mode_quad", "Loop Mode: Quad", hotkeys.get("loop_mode_quad") if hotkeys else None)
+        menu.addSeparator()
+        menu.addActionItem("loop_mode_toggle", "Loop Mode: Toggle", hotkeys.get("loop_mode_toggle") if hotkeys else None)
+        return menu
+
+    @staticmethod
+    def extend_menu(menu, hotkeys=None, add_separator=True):
+        """Append loop mode actions to an existing ViewerStateMenu."""
+        if menu is None:
+            return None
+        if add_separator:
+            menu.addSeparator()
+        menu.addActionItem("loop_mode_roll", "Loop Mode: Roll", hotkeys.get("loop_mode_roll") if hotkeys else None)
+        menu.addActionItem("loop_mode_quad", "Loop Mode: Quad", hotkeys.get("loop_mode_quad") if hotkeys else None)
+        menu.addActionItem("loop_mode_toggle", "Loop Mode: Toggle", hotkeys.get("loop_mode_toggle") if hotkeys else None)
+        return menu
+
+    @staticmethod
+    def install_menu(template, state_typename, state_label=None):
+        """Create and bind a loop mode menu + hotkeys onto the template."""
+        hotkey_defs = hou.PluginHotkeyDefinitions()
+        hotkeys = TransversalLoopFeature.build_hotkeys(hotkey_defs, state_typename)
+        menu = TransversalLoopFeature.build_menu(state_typename, state_label, hotkeys=hotkeys)
+        template.bindMenu(menu)
+        template.bindHotkeyDefinitions(hotkey_defs)
+        return menu
+
+    def handle_menu_action(self, kwargs):
+        action = kwargs.get("menu_item")
+        if action == "loop_mode_roll":
             self.mode = LOOP_MODE_ROLL
-            print("[SkyForge] Transversal loop mode -> roll")
             return True
-        if key == "q":
+        if action == "loop_mode_quad":
             self.mode = LOOP_MODE_QUAD
-            print("[SkyForge] Transversal loop mode -> quad")
             return True
-        if key == "x":
+        if action == "loop_mode_toggle":
             self.mode = LOOP_MODE_QUAD if self.mode == LOOP_MODE_ROLL else LOOP_MODE_ROLL
-            print("[SkyForge] Transversal loop mode ->", self.mode)
             return True
         return False
+
+    def on_menu_pre_open(self, kwargs):
+        menu_id = kwargs.get("menu")
+        if not menu_id or not str(menu_id).endswith("_loop_menu"):
+            return False
+        menu_item_states = kwargs.get("menu_item_states")
+        if not isinstance(menu_item_states, dict):
+            return False
+        menu_item_states["loop_mode_roll"]["enable"] = True
+        menu_item_states["loop_mode_quad"]["enable"] = True
+        menu_item_states["loop_mode_toggle"]["enable"] = True
+        return True
+
+    # ------------------------------------------------------------------
+    # HUD helpers (optional)
+    # ------------------------------------------------------------------
+    def hud_template(self):
+        return [
+            {"id": "loop_mode", "label": "Loop Mode"},
+            {"id": "loop_mode_keys", "label": "Mode Keys"},
+        ]
+
+    def hud_values(self, ctx=None):
+        label = "Roll" if self.mode == LOOP_MODE_ROLL else "Quad"
+        keys_txt = "R / Q / X"
+        return {
+            "loop_mode": label,
+            "loop_mode_keys": keys_txt,
+        }
 
     # Public API used by pyd_loop_modular orchestrator
     def clear_preview(self, ctx):
@@ -108,6 +197,7 @@ class TransversalLoopFeature(ViewerFeature):
         self.output_mode = (mode or OUTPUT_MODE_EDGE).lower().strip()
 
     def set_basegroup_from_edge(self, ctx, p0, p1):
+        # Deprecated: kept for compatibility (no-op, no parm writes).
         self._set_basegroup_from_points(ctx, p0, p1)
 
     def preview_edge(self, ctx, p0, p1):
@@ -116,7 +206,6 @@ class TransversalLoopFeature(ViewerFeature):
             self._hide_preview(ctx)
             return False
 
-        self._set_basegroup_from_points(ctx, p0, p1)
         self._set_preview_path(ctx, [he])
         return True
 
@@ -144,17 +233,12 @@ class TransversalLoopFeature(ViewerFeature):
         """Commit loop from target half-edge into parm string and channel."""
         if he < 0:
             return False
-        p0 = int(ctx.mesh.src(int(he)))
-        p1 = int(ctx.mesh.dst(int(he)))
-        self._set_basegroup_from_points(ctx, p0, p1)
         path = self._compute_loop(ctx, int(he))
         if not path:
             self._hide_preview(ctx)
             return False
         self._set_committed_path(ctx, path)
-        if ctx.parm_string is not None:
-            ctx.parm_string.set(ctx.hedges_to_group_string_mode(path, self.output_mode))
-        return True
+        return self._payload_from_hedges(ctx, path)
 
     def commit_loop_from_edge(self, ctx, p0, p1):
         he = ctx.edge_to_hedge(p0, p1)
@@ -182,8 +266,7 @@ class TransversalLoopFeature(ViewerFeature):
         if pair is None:
             return False
 
-        # Selection sync only: set basegroup from first selected edge.
-        # Loop commit is handled by explicit mouse chord (Shift + MMB).
+        # Selection sync only (no parm writes in payload mode).
         self._set_basegroup_from_points(ctx, pair[0], pair[1])
         return False
 
@@ -209,11 +292,9 @@ class TransversalLoopFeature(ViewerFeature):
         if pair is None:
             self._reset_session(ctx)
             return True
-
         p0, p1 = pair
-        self._set_basegroup_from_points(ctx, p0, p1)
 
-        # Shift + LMB => basegroup only
+        # Shift + LMB => anchor only (no commit)
         if is_lmb:
             return True
 
@@ -227,9 +308,7 @@ class TransversalLoopFeature(ViewerFeature):
             return True
 
         self._set_committed_path(ctx, path)
-        if ctx.parm_string is not None:
-            ctx.parm_string.set(ctx.hedges_to_group_string_mode(path, self.output_mode))
-        return True
+        return self._payload_from_hedges(ctx, path)
 
     def _compute_loop(self, ctx, he):
         if self.mode == LOOP_MODE_QUAD:
@@ -299,12 +378,19 @@ class TransversalLoopFeature(ViewerFeature):
         return int(hit[0]), int(hit[1])
 
     def _set_basegroup_from_points(self, ctx, p0, p1):
-        ctx.set_basegroup_from_points(p0, p1)
+        # Deprecated hook: no-op (payload-only mode, no parm writes).
+        pass
+
+    def _payload_from_hedges(self, ctx, hedges):
+        group = ctx.hedges_to_group_string_mode(hedges, self.output_mode)
+        return {
+            "mode": self.output_mode,
+            "group": group,
+        }
 
     def _reset_session(self, ctx):
         self._hide_preview(ctx)
         self._hide_committed(ctx)
-        ctx.clear_group_parms(GROUP_PARM_NAMES)
 
     def _is_shift_down(self, dev):
         try:

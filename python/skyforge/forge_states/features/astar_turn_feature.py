@@ -9,8 +9,6 @@ from ..constants import (
     LINE_WIDTH,
     COLOR_PREVIEW_YELLOW,
     COLOR_COMMITTED_ORANGE,
-    PARM_BASEGROUP,
-    GROUP_PARM_NAMES,
     OUTPUT_MODE_EDGE,
     CH_ASTAR_PREVIEW,
     CH_ASTAR_COMMITTED,
@@ -23,7 +21,7 @@ class AstarTurnFeature(ViewerFeature):
 
     Owns two preview channels:
     - `ch_preview`: live path while hovering target edge
-    - `ch_committed`: committed path written to `grstr`
+    - `ch_committed`: committed path (payload output)
     """
     name = "astar_turn"
 
@@ -38,11 +36,13 @@ class AstarTurnFeature(ViewerFeature):
         self.ch_committed = CH_ASTAR_COMMITTED
         self._last_commit_edge = -1
         self._last_commit_t = 0.0
+        self._shift_a_active = False
 
     def on_enter(self, ctx, kwargs):
         """Initialize/reuse preview service and sync initial committed/base state."""
         self.start_he = -1
         self.hover_he = -1
+        self.committed_hedges = []
         self.preview = ctx.get_service("preview")
         if self.preview is None:
             # Keep external injection support: only create service when absent.
@@ -60,16 +60,9 @@ class AstarTurnFeature(ViewerFeature):
             COLOR_PREVIEW_YELLOW,
             line_width=float(LINE_WIDTH),
         )
-        self.committed_hedges = self._hedges_from_group_string(ctx, (ctx.parm_string.eval() if ctx.parm_string is not None else ""))
         if self.committed_hedges:
             self.start_he = self.committed_hedges[-1]
             self._set_committed_path(ctx, self.committed_hedges)
-
-        bg = ctx.node.parm(PARM_BASEGROUP) if ctx.node is not None else None
-        if bg is not None:
-            p0, p1 = self._first_edge_from_group(ctx, bg.eval())
-            if p0 >= 0:
-                self.start_he = ctx.edge_to_hedge(p0, p1)
 
     def on_exit(self, ctx, kwargs):
         """Hide preview and committed channels."""
@@ -87,6 +80,34 @@ class AstarTurnFeature(ViewerFeature):
         preview.draw_channels(draw_handle, (self.ch_preview, self.ch_committed))
 
     def on_key_event(self, ctx, kwargs):
+        ui = kwargs.get("ui_event")
+        if ui is None:
+            return False
+
+        dev = ui.device()
+        if dev.isAutoRepeat():
+            return False
+
+        key = (dev.keyString() or "").lower()
+        if key == "shift+a" or (key == "a" and self._is_shift_down(dev)):
+            self._shift_a_active = True
+            return True
+        return False
+
+    def on_key_transit_event(self, ctx, kwargs):
+        ui = kwargs.get("ui_event")
+        if ui is None:
+            return False
+
+        dev = ui.device()
+        if not dev.isKeyUp():
+            return False
+
+        key = (dev.keyString() or "").lower()
+        if key in ("shift", "a", "shift+a"):
+            self._shift_a_active = False
+            self._hide_preview(ctx)
+            return True
         return False
 
     # Public API for orchestrator-driven interactions
@@ -95,7 +116,7 @@ class AstarTurnFeature(ViewerFeature):
         self._hide_preview(ctx)
 
     def reset_all(self, ctx):
-        """Reset internal state and clear related group parms/channels."""
+        """Reset internal state and clear related channels."""
         self._reset_session(ctx)
 
     def set_output_mode(self, mode):
@@ -110,8 +131,8 @@ class AstarTurnFeature(ViewerFeature):
         return True
 
     def preview_from_base_to_he(self, ctx, end_he):
-        """Compute and display A* path from basegroup edge to target half-edge."""
-        start_he = self._start_from_basegroup(ctx)
+        """Compute and display A* path from current start edge to target half-edge."""
+        start_he = self.start_he
         if start_he < 0 or end_he < 0 or start_he == end_he:
             self._hide_preview(ctx)
             return False
@@ -125,29 +146,25 @@ class AstarTurnFeature(ViewerFeature):
         return True
 
     def commit_from_base_to_he(self, ctx, end_he):
-        """Commit A* path to parm string and update chain start/basegroup."""
-        start_he = self._start_from_basegroup(ctx)
+        """Commit A* path and update chain start."""
         if end_he < 0:
             return False
 
         # First click in A* mode: define start edge and show a preview.
-        if start_he < 0:
+        if self.start_he < 0:
             p0 = int(ctx.mesh.src(end_he))
             p1 = int(ctx.mesh.dst(end_he))
             self.start_he = int(end_he)
-            self._set_basegroup_from_points(ctx, p0, p1)
             self.preview_single_edge(ctx, end_he)
-            return True
+            return self._payload_from_hedges(ctx, [int(end_he)])
 
-        path = ctx.mesh.astar_turn(start_he, end_he)
+        path = ctx.mesh.astar_turn(self.start_he, end_he)
         if not path:
             return False
 
-        current = self._current_committed_from_parm(ctx)
-        merged = self._merge_path(current, path)
+        merged = self._merge_path(self.committed_hedges, path)
 
-        if ctx.parm_string is not None:
-            ctx.parm_string.set(ctx.hedges_to_group_string_mode(merged, self.output_mode))
+        commit_result = self._payload_from_hedges(ctx, merged)
 
         self.committed_hedges = list(merged)
         self._set_committed_path(ctx, self.committed_hedges)
@@ -156,9 +173,9 @@ class AstarTurnFeature(ViewerFeature):
         # Chain behavior: next A* starts from the clicked edge.
         p0 = int(ctx.mesh.src(end_he))
         p1 = int(ctx.mesh.dst(end_he))
-        self._set_basegroup_from_points(ctx, p0, p1)
+        self.start_he = ctx.edge_to_hedge(p0, p1)
 
-        return True
+        return commit_result
 
     def on_selection(self, ctx, kwargs):
         selection = kwargs.get("selection")
@@ -177,9 +194,7 @@ class AstarTurnFeature(ViewerFeature):
         if he < 0:
             return False
 
-        self.committed_hedges = self._current_committed_from_parm(ctx)
         self.start_he = he
-        self._set_basegroup_from_points(ctx, p[0], p[1])
         self.hover_he = -1
         self._set_preview_path(ctx, self.committed_hedges)
         return False
@@ -191,11 +206,20 @@ class AstarTurnFeature(ViewerFeature):
 
         reason = ui.reason()
         dev = ui.device()
+        shift = self._is_shift_down(dev)
 
         if reason not in (hou.uiEventReason.Start, hou.uiEventReason.Active, hou.uiEventReason.Located):
             return False
 
         if reason in (hou.uiEventReason.Start, hou.uiEventReason.Active) and not dev.isLeftButton():
+            return False
+
+        # When Shift+A is not held, keep showing the start edge if any.
+        if reason == hou.uiEventReason.Located and not (self._shift_a_active and shift):
+            if self.start_he >= 0:
+                self.preview_single_edge(ctx, self.start_he)
+            else:
+                self._hide_preview(ctx)
             return False
 
         edge = self._hit_edge(ctx, ui)
@@ -213,6 +237,8 @@ class AstarTurnFeature(ViewerFeature):
             return True
 
         if reason == hou.uiEventReason.Located:
+            if not (self._shift_a_active and shift):
+                return False
             if self.start_he < 0:
                 self._set_preview_path(ctx, self.committed_hedges)
                 return False
@@ -228,47 +254,41 @@ class AstarTurnFeature(ViewerFeature):
             self._set_preview_path(ctx, path)
             return False
 
+        # Start click without Shift+A: define start edge only.
+        if not (self._shift_a_active and shift):
+            self.start_he = he
+            self.hover_he = -1
+            self.preview_single_edge(ctx, he)
+            return True
+
         if self._is_duplicate_commit_click(he):
             return True
 
+        # Commit only when Shift+A is held.
         if self.start_he < 0:
-            # Try to recover start from current basegroup on demand.
-            start_from_bg = self._start_from_basegroup(ctx)
-            if start_from_bg >= 0:
-                self.start_he = start_from_bg
-            else:
-                # No start yet: first click defines start edge.
-                self.start_he = he
-                self._set_basegroup_from_points(ctx, p0, p1)
-                self.hover_he = -1
-                self._set_preview_path(ctx, self.committed_hedges)
-                return True
+            self.start_he = he
+            self.preview_single_edge(ctx, he)
+            return self._payload_from_hedges(ctx, [int(he)])
 
         path = ctx.mesh.astar_turn(self.start_he, he)
         if not path:
             return True
 
-        current = self._current_committed_from_parm(ctx)
-        self.committed_hedges = self._merge_path(current, path)
-        if ctx.parm_string is not None:
-            ctx.parm_string.set(ctx.hedges_to_group_string_mode(self.committed_hedges, self.output_mode))
+        self.committed_hedges = self._merge_path(self.committed_hedges, path)
+        commit_result = self._payload_from_hedges(ctx, self.committed_hedges)
 
         # Chain behavior: clicked edge becomes next start.
         self.start_he = he
-        self._set_basegroup_from_points(ctx, p0, p1)
         self.hover_he = -1
         self._set_committed_path(ctx, self.committed_hedges)
         self._hide_preview(ctx)
-        return True
+        return commit_result
 
     def _hit_edge(self, ctx, ui_event):
         hit = ctx.hit_edge(ui_event)
         if hit is None:
             return None
         return int(hit[0]), int(hit[1])
-
-    def _first_edge_from_group(self, ctx, group_str):
-        return ctx.first_edge_from_group_string(group_str)
 
     def _edgepair_from_selstr(self, selstr):
         m = re.search(r"p(\d+)-(\d+)", selstr or "")
@@ -328,21 +348,6 @@ class AstarTurnFeature(ViewerFeature):
         out.extend(incoming[start:])
         return out
 
-    def _hedges_from_group_string(self, ctx, group_str):
-        return ctx.hedges_from_group_string(group_str)
-
-    def _current_committed_from_parm(self, ctx):
-        if ctx.parm_string is None:
-            return list(self.committed_hedges)
-        try:
-            text = ctx.parm_string.eval()
-        except Exception:
-            text = ""
-        parsed = self._hedges_from_group_string(ctx, text)
-        if parsed:
-            return parsed
-        return list(self.committed_hedges)
-
     def _is_duplicate_commit_click(self, he):
         t = time.monotonic()
         if he == self._last_commit_edge and (t - self._last_commit_t) < 0.2:
@@ -351,20 +356,12 @@ class AstarTurnFeature(ViewerFeature):
         self._last_commit_t = t
         return False
 
-    def _start_from_basegroup(self, ctx):
-        if ctx.node is None:
-            return -1
-        parm = ctx.node.parm(PARM_BASEGROUP)
-        if parm is None:
-            return -1
-
-        p0, p1 = self._first_edge_from_group(ctx, parm.eval())
-        if p0 < 0:
-            return -1
-        return ctx.edge_to_hedge(p0, p1)
-
-    def _set_basegroup_from_points(self, ctx, p0, p1):
-        ctx.set_basegroup_from_points(p0, p1)
+    def _payload_from_hedges(self, ctx, hedges):
+        group = ctx.hedges_to_group_string_mode(hedges, self.output_mode)
+        return {
+            "mode": self.output_mode,
+            "group": group,
+        }
 
     def _reset_session(self, ctx):
         self.start_he = -1
@@ -372,4 +369,10 @@ class AstarTurnFeature(ViewerFeature):
         self.committed_hedges = []
         self._hide_preview(ctx)
         self._hide_committed(ctx)
-        ctx.clear_group_parms(GROUP_PARM_NAMES)
+
+    def _is_shift_down(self, dev):
+        try:
+            return bool(dev.isShiftKey())
+        except Exception:
+            key = (dev.keyString() or "").lower()
+            return "shift" in key
