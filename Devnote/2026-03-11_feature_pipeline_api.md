@@ -35,7 +35,7 @@ Fichier: `python/skyforge/forge_states/features/hover_gadget_feature.py`
 - `attach(host, ctx, kwargs, geometry=None, mode=None)`
 
 ### Runtime
-- `tick(ctx, kwargs) -> (hover_payload, click_payload)`
+- `tick(ctx, kwargs) -> (hover, click_payload)`
 - `draw(ctx, kwargs)`
 - `detach(ctx, kwargs)`
 

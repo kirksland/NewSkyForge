@@ -176,7 +176,7 @@ class HoverGadgetFeature(ViewerFeature):
     def tick(self, ctx, kwargs):
         """
         High-level runtime helper.
-        Returns (hover_payload, click_payload_or_None).
+        Returns (hover, click_payload_or_None).
         """
         self.on_mouse_event(ctx, kwargs)
         return self.get_hover(), self.consume_click()

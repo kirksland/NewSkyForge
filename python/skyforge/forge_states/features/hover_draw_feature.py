@@ -267,4 +267,4 @@ class HoverDrawFeature(ViewerFeature):
         hover = ctx.get_service("hover")
         if hover:
             return hover
-        return ctx.get_service("hover_payload")
+        return None

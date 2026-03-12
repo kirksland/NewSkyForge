@@ -16,7 +16,6 @@ Define the shared runtime context for modular viewer states.
 - `ctx.services["preview"]`: shared PreviewService.
 - `ctx.services["hover"]`: normalized hover payload.
 - `ctx.services["hit"]`: ray hit payload for non-gadget tools.
-- `ctx.services["hover_payload"]`: feature-specific hover data.
 
 ## Geometry Flow
 

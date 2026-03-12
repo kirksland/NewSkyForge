@@ -150,7 +150,7 @@ class HoverMoveFeature(ViewerFeature):
         hover = ctx.get_service("hover")
         if hover:
             return hover
-        return ctx.get_service("hover_payload")
+        return None
 
     def _hover_to_points_and_origin(self, ctx, hover):
         if not hover or not hover.get("visible"):

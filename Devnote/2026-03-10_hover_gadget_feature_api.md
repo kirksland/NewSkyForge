@@ -34,7 +34,7 @@ self.hover_feature.attach(
 )
 ```
 
-### `tick(ctx, kwargs) -> (hover_payload, click_payload)`
+### `tick(ctx, kwargs) -> (hover, click_payload)`
 Fait une iteration interaction:
 - `on_mouse_event(ctx, kwargs)`
 - retourne `get_hover()`
@@ -63,7 +63,7 @@ Aucune suppression:
 - `clear()`
 
 ## Payload retour
-`hover_payload` (via `get_hover`) conserve le format:
+`hover` (via `get_hover`) conserve le format:
 ```python
 {
   "gadget": str | None,
