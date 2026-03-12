@@ -152,3 +152,8 @@ int walk_rail(int hstart; string outgrp; int maxit)
     }
     return it;
 }
+
+void test1(string test)
+{
+    printf("test %s\n",test);
+}
