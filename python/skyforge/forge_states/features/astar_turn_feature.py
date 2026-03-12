@@ -208,6 +208,13 @@ class AstarTurnFeature(ViewerFeature):
         dev = ui.device()
         shift = self._is_shift_down(dev)
 
+        # Auto output mode from hover payload when available.
+        hover = ctx.get_service("hover") if hasattr(ctx, "get_service") else None
+        if hover:
+            auto_mode = self._output_mode_from_hover(hover)
+            if auto_mode is not None:
+                self.output_mode = auto_mode
+
         if reason not in (hou.uiEventReason.Start, hou.uiEventReason.Active, hou.uiEventReason.Located):
             return False
 
@@ -376,3 +383,14 @@ class AstarTurnFeature(ViewerFeature):
         except Exception:
             key = (dev.keyString() or "").lower()
             return "shift" in key
+
+    def _output_mode_from_hover(self, hover):
+        if not hover or not hover.get("visible"):
+            return None
+        if int(hover.get("prim", -1)) >= 0:
+            return "prim"
+        if int(hover.get("point", -1)) >= 0:
+            return "point"
+        if hover.get("edge") is not None:
+            return "edge"
+        return None

@@ -10,6 +10,8 @@ from ..constants import (
     LOOP_MODE_ROLL,
     LOOP_MODE_QUAD,
     OUTPUT_MODE_EDGE,
+    OUTPUT_MODE_POINT,
+    OUTPUT_MODE_PRIM,
     CH_LOOP_PREVIEW,
     CH_LOOP_COMMITTED,
 )
@@ -288,6 +290,13 @@ class TransversalLoopFeature(ViewerFeature):
         if not self._is_shift_down(dev):
             return False
 
+        # Auto output mode from hover payload when available.
+        hover = ctx.get_service("hover") if hasattr(ctx, "get_service") else None
+        if hover:
+            auto_mode = self._output_mode_from_hover(hover)
+            if auto_mode is not None:
+                self.output_mode = auto_mode
+
         pair = self._hit_edge(ctx, ui)
         if pair is None:
             self._reset_session(ctx)
@@ -406,3 +415,14 @@ class TransversalLoopFeature(ViewerFeature):
         if edge is None:
             return -1
         return ctx.edge_to_hedge(int(edge[0]), int(edge[1]))
+
+    def _output_mode_from_hover(self, hover):
+        if not hover or not hover.get("visible"):
+            return None
+        if int(hover.get("prim", -1)) >= 0:
+            return OUTPUT_MODE_PRIM
+        if int(hover.get("point", -1)) >= 0:
+            return OUTPUT_MODE_POINT
+        if hover.get("edge") is not None:
+            return OUTPUT_MODE_EDGE
+        return None
