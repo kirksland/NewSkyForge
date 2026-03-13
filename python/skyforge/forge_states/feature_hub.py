@@ -40,6 +40,29 @@ class FeatureHub:
                     break
         return consumed
 
+    def mouse_collect(self, ctx, kwargs, payload_picker=None, stop_on_consume=False):
+        """
+        Dispatch mouse events and collect a payload.
+
+        payload_picker: optional function that receives a value and returns a payload (or None).
+        If not provided, any dict with a 'group' key is treated as a payload.
+        Returns (consumed, payload_or_None).
+        """
+        consumed = False
+        payload = None
+        for f in self._iter_features():
+            out = self._call(f, "on_mouse_event", ctx, kwargs)
+            if out:
+                consumed = True
+                if payload is None:
+                    if payload_picker is not None:
+                        payload = payload_picker(out)
+                    elif isinstance(out, dict) and out.get("group"):
+                        payload = out
+            if consumed and stop_on_consume:
+                break
+        return consumed, payload
+
     def key(self, ctx, kwargs, stop_on_consume=False):
         consumed = False
         for f in self._iter_features():
