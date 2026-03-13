@@ -1,5 +1,8 @@
 class ViewerFeature:
     name = "base"
+    # Optional dependency metadata for FeatureHub ordering.
+    provides = ()
+    requires = ()
 
     def on_enter(self, ctx, kwargs):
         pass

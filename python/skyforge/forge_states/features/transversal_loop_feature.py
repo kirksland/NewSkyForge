@@ -26,6 +26,7 @@ class TransversalLoopFeature(ViewerFeature):
     - `ch_committed`: committed loop (payload output)
     """
     name = "transversal_loop"
+    requires = ("hover",)
 
     def __init__(self):
         """Initialize runtime mode, output mode, and preview channel names."""

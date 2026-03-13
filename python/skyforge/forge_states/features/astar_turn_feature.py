@@ -24,6 +24,7 @@ class AstarTurnFeature(ViewerFeature):
     - `ch_committed`: committed path (payload output)
     """
     name = "astar_turn"
+    requires = ("hover",)
 
     def __init__(self):
         """Initialize runtime state, output mode, and preview channel names."""

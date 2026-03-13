@@ -16,6 +16,7 @@ class HoverGadgetFeature(ViewerFeature):
     """
 
     name = "hover_gadget"
+    provides = ("hover",)
 
     MODE_LINE = "line"
     MODE_FACE = "face"
@@ -30,6 +31,7 @@ class HoverGadgetFeature(ViewerFeature):
         point_gadget="point_gadget",
         point_hover_gadget="point_hover_gadget",
         enable_ray_filter=True,
+        write_ctx_hover=True,
     ):
         """Initialize gadget names and runtime hover state."""
         self.line_gadget_name = str(line_gadget)
@@ -37,6 +39,7 @@ class HoverGadgetFeature(ViewerFeature):
         self.point_gadget_name = str(point_gadget)
         self.point_hover_gadget_name = str(point_hover_gadget)
         self.enable_ray_filter = bool(enable_ray_filter)
+        self.write_ctx_hover = bool(write_ctx_hover)
 
         self.host = None
         self.scene_viewer = None
@@ -347,6 +350,11 @@ class HoverGadgetFeature(ViewerFeature):
     def on_exit(self, ctx, kwargs):
         """Clear state and hide all gadgets/drawables."""
         self.clear()
+        if self.write_ctx_hover and ctx is not None:
+            try:
+                ctx.set_service("hover", None)
+            except Exception:
+                pass
         self._hide_all_gadgets()
         if self.hover_edge_drawable is not None:
             self.hover_edge_drawable.show(False)
@@ -357,6 +365,11 @@ class HoverGadgetFeature(ViewerFeature):
         sc = self._state_context()
         if ui is None or sc is None:
             self.clear()
+            if self.write_ctx_hover and ctx is not None:
+                try:
+                    ctx.set_service("hover", self.get_hover())
+                except Exception:
+                    pass
             return False
 
         gadget_name = None
@@ -373,11 +386,21 @@ class HoverGadgetFeature(ViewerFeature):
         active = self._active_gadgets()
         if gadget_name not in active:
             self.clear()
+            if self.write_ctx_hover and ctx is not None:
+                try:
+                    ctx.set_service("hover", self.get_hover())
+                except Exception:
+                    pass
             return False
 
         visible = self._is_visible_for_gadget(ui, gadget_name, c1, c2)
         self._update_hover_payload(gadget_name, c1, c2, visible)
         self._apply_hover_visuals(gadget_name, c1, c2, visible)
+        if self.write_ctx_hover and ctx is not None:
+            try:
+                ctx.set_service("hover", self.get_hover())
+            except Exception:
+                pass
 
         if ui.reason() == hou.uiEventReason.Start and ui.device().isLeftButton():
             self._last_click = dict(self.hover)
