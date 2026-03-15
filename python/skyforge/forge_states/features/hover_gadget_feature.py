@@ -269,26 +269,41 @@ class HoverGadgetFeature(ViewerFeature):
     # ------------------------------------------------------------------
     def hud_template(self):
         return [
+            {"id": "hover_edge", "label": "Hover"},
             {"id": "hover_mode", "label": "Hover Mode"},
             {"id": "hover_mode_keys", "label": "Mode Keys"},
+            {"id":"hover_mode_g", "type": "choicegraph", "count": 3},
         ]
 
     def hud_values(self, ctx=None):
+        edge_txt = "-"
+        if ctx is not None and hasattr(ctx, "get_service"):
+            hover = ctx.get_service("hover") or {}
+            if hover.get("visible") and hover.get("edge") is not None:
+                a, b = hover["edge"]
+                edge_txt = "p{0}-p{1}".format(int(a), int(b))
         label = {
             self.MODE_LINE: "Edge",
             self.MODE_POINT: "Point",
             self.MODE_FACE: "Face",
         }.get(self.mode, "Edge")
         key_map = {
-            self.MODE_POINT: "&",
-            self.MODE_LINE: "é",
-            self.MODE_FACE: "\"",
+            self.MODE_POINT: "1",
+            self.MODE_LINE: "2",
+            self.MODE_FACE: "3",
         }
         keys = [key_map[m] for m in self.MODE_ORDER if m in self.allowed_modes]
         keys_txt = " / ".join(keys) if keys else "-"
+        mode_idx = {
+            self.MODE_LINE: 0,
+            self.MODE_POINT: 1,
+            self.MODE_FACE: 2,
+        }.get(self.mode, 0)
         return {
+            "hover_edge": edge_txt,
             "hover_mode": label,
             "hover_mode_keys": keys_txt,
+            "hover_mode_g": mode_idx,
         }
 
     def set_geometry(self, geo):

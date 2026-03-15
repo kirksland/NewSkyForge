@@ -22,11 +22,8 @@ class State(BaseState):
         "desc": "payload test (no parm required)",
         "icon": "$SK_ICONS/devtools.svg",
         "rows": [
-            {"id": "hover_edge", "label": "Hover"},
             {"label": "A*", "key": "Shift + A + LMB"},
             {"label": "Loop", "key": "Shift + MMB"},
-            {"id": "loop_mode", "label": "Mode", "key": "R / Q / X"},
-            {"id": "loop_mode_g", "type": "choicegraph", "count": 2},
         ],
     }
 
@@ -50,7 +47,7 @@ class State(BaseState):
         self.hover_feature.set_geometry(self.ctx.geometry)
         self.hover_feature.set_mode(HoverGadgetFeature.MODE_LINE)
         self.hub.enter(self.ctx, kwargs)
-        self._setup_hud()
+        self.hub.apply_hud(self.scene_viewer, base_template=self.HUD_TEMPLATE)
         self._update_hud()
 
     def onExit(self, kwargs):
@@ -80,7 +77,7 @@ class State(BaseState):
 
     def onDraw(self, kwargs):
         self.hub.draw(self.ctx, kwargs)
-        self._update_hud()
+        self.hub.update_hud(self.scene_viewer, self.ctx)
 
     def onKeyEvent(self, kwargs):
         if self.astar_feature.on_key_event(self.ctx, kwargs):
@@ -95,16 +92,11 @@ class State(BaseState):
     def onMenuAction(self, kwargs):
         handled = bool(self.hub.menu(self.ctx, kwargs, stop_on_consume=False))
         if handled:
-            self._update_hud()
+            self.hub.update_hud(self.scene_viewer, self.ctx)
         return handled
 
     def onMenuPreOpen(self, kwargs):
-        handled = False
-        if self.hover_feature.on_menu_pre_open(kwargs):
-            handled = True
-        if self.loop_feature.on_menu_pre_open(kwargs):
-            handled = True
-        return handled
+        return bool(self.hub.menu_pre_open(self.ctx, kwargs, stop_on_consume=False))
 
     def _pick_payload(self, value):
         if isinstance(value, dict) and value.get("group"):
@@ -123,30 +115,9 @@ class State(BaseState):
         except Exception:
             pass
 
-    def _setup_hud(self):
-        try:
-            self.scene_viewer.hudInfo(template=self.HUD_TEMPLATE)
-        except Exception:
-            pass
-
     def _update_hud(self):
         try:
-            hover = self.ctx.get_service("hover") or {}
-            edge_txt = "-"
-            if hover.get("visible") and hover.get("edge") is not None:
-                a, b = hover["edge"]
-                edge_txt = "p{0}-p{1}".format(int(a), int(b))
-
-            mode = self.loop_feature.mode
-            mode_txt = "Roll" if mode == "roll" else "Quad"
-            mode_idx = 0 if mode == "roll" else 1
-
-            values = {
-                "hover_edge": edge_txt,
-                "loop_mode": mode_txt,
-                "loop_mode_g": mode_idx,
-            }
-            self.scene_viewer.hudInfo(hud_values=values)
+            self.hub.update_hud(self.scene_viewer, self.ctx)
         except Exception:
             pass
 

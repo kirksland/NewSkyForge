@@ -11,6 +11,7 @@ class FeatureHub:
         self._ordered = None
         self._dirty = True
         self._order_error = None
+        self._hud_ids = None
 
     def add(self, feature):
         if feature is None:
@@ -83,6 +84,16 @@ class FeatureHub:
                     break
         return consumed
 
+    def menu_pre_open(self, ctx, kwargs, stop_on_consume=False):
+        consumed = False
+        for f in self._iter_features():
+            out = self._call(f, "on_menu_pre_open", kwargs)
+            if out:
+                consumed = True
+                if stop_on_consume:
+                    break
+        return consumed
+
     def hud_template(self):
         rows = []
         for f in self._iter_features():
@@ -104,6 +115,69 @@ class FeatureHub:
                 except Exception:
                     pass
         return values
+
+    def apply_hud(self, scene_viewer, base_template=None):
+        if scene_viewer is None:
+            return False
+        template = dict(base_template or {})
+        base_rows = list(template.get("rows") or [])
+        extra_rows = self.hud_template()
+        rows = self._merge_hud_rows(base_rows, extra_rows)
+        template["rows"] = rows
+        self._hud_ids = self._collect_hud_ids(rows)
+        try:
+            scene_viewer.hudInfo(template=template)
+            return True
+        except Exception:
+            self._hud_ids = None
+            return False
+
+    def update_hud(self, scene_viewer, ctx, base_values=None):
+        if scene_viewer is None:
+            return False
+        if not self._hud_ids:
+            return False
+        values = {}
+        try:
+            values.update(self.hud_values(ctx) or {})
+            if base_values:
+                values.update(dict(base_values))
+            if values:
+                values = {k: v for k, v in values.items() if k in self._hud_ids}
+            if values:
+                scene_viewer.hudInfo(hud_values=values)
+            return True
+        except Exception:
+            return False
+
+    def _merge_hud_rows(self, base_rows, extra_rows):
+        out = list(base_rows or [])
+        seen_ids = set()
+        for row in out:
+            if isinstance(row, dict):
+                rid = row.get("id")
+                if rid:
+                    seen_ids.add(rid)
+        for row in extra_rows or []:
+            if not isinstance(row, dict):
+                out.append(row)
+                continue
+            rid = row.get("id")
+            if rid and rid in seen_ids:
+                continue
+            out.append(row)
+            if rid:
+                seen_ids.add(rid)
+        return out
+
+    def _collect_hud_ids(self, rows):
+        ids = set()
+        for row in rows or []:
+            if isinstance(row, dict):
+                rid = row.get("id")
+                if rid:
+                    ids.add(rid)
+        return ids
 
     def _iter_features(self):
         if self._dirty or self._ordered is None:

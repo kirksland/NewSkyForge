@@ -176,14 +176,17 @@ class TransversalLoopFeature(ViewerFeature):
         return [
             {"id": "loop_mode", "label": "Loop Mode"},
             {"id": "loop_mode_keys", "label": "Mode Keys"},
+            {"id": "loop_mode_g", "type": "choicegraph", "count": 2},
         ]
 
     def hud_values(self, ctx=None):
         label = "Roll" if self.mode == LOOP_MODE_ROLL else "Quad"
-        keys_txt = "R / Q / X"
+        keys_txt = "X"
+        mode_idx = 0 if self.mode == LOOP_MODE_ROLL else 1
         return {
             "loop_mode": label,
             "loop_mode_keys": keys_txt,
+            "loop_mode_g": mode_idx,
         }
 
     # Public API used by pyd_loop_modular orchestrator
