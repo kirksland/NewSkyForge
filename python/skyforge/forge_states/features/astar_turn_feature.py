@@ -111,6 +111,20 @@ class AstarTurnFeature(ViewerFeature):
             return True
         return False
 
+    @staticmethod
+    def builder_schema():
+        return {
+            "setup": [
+                {
+                    "label": "Output Mode",
+                    "method": "set_output_mode",
+                    "type": "enum",
+                    "options": ["edge", "point", "prim"],
+                    "default": OUTPUT_MODE_EDGE,
+                },
+            ]
+        }
+
     # Public API for orchestrator-driven interactions
     def clear_preview(self, ctx):
         """Clear live preview channel only."""

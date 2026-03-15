@@ -267,6 +267,32 @@ class HoverGadgetFeature(ViewerFeature):
     # ------------------------------------------------------------------
     # HUD helpers (optional)
     # ------------------------------------------------------------------
+    @staticmethod
+    def builder_schema():
+        return {
+            "setup": [
+                {
+                    "label": "Mode",
+                    "method": "set_mode",
+                    "type": "enum",
+                    "options": [
+                        HoverGadgetFeature.MODE_LINE,
+                        HoverGadgetFeature.MODE_POINT,
+                        HoverGadgetFeature.MODE_FACE,
+                        HoverGadgetFeature.MODE_FACE_POINT,
+                    ],
+                    "default": HoverGadgetFeature.MODE_LINE,
+                },
+                {
+                    "label": "Allowed Modes",
+                    "method": "set_allowed_modes",
+                    "type": "multi_enum",
+                    "options": list(HoverGadgetFeature.MODE_ORDER),
+                    "default": list(HoverGadgetFeature.MODE_ORDER),
+                },
+            ]
+        }
+
     def hud_template(self):
         return [
             {"id": "hover_edge", "label": "Hover"},

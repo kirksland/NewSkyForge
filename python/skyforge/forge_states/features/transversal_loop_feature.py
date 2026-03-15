@@ -75,6 +75,12 @@ class TransversalLoopFeature(ViewerFeature):
     def on_key_event(self, ctx, kwargs):
         return False
 
+    def set_mode(self, mode):
+        m = (mode or "").lower().strip()
+        if m in (LOOP_MODE_ROLL, LOOP_MODE_QUAD):
+            self.mode = m
+        return self.mode
+
     # ------------------------------------------------------------------
     # Menu + hotkeys
     # ------------------------------------------------------------------
@@ -172,6 +178,27 @@ class TransversalLoopFeature(ViewerFeature):
     # ------------------------------------------------------------------
     # HUD helpers (optional)
     # ------------------------------------------------------------------
+    @staticmethod
+    def builder_schema():
+        return {
+            "setup": [
+                {
+                    "label": "Mode",
+                    "method": "set_mode",
+                    "type": "enum",
+                    "options": [LOOP_MODE_ROLL, LOOP_MODE_QUAD],
+                    "default": LOOP_MODE_ROLL,
+                },
+                {
+                    "label": "Output Mode",
+                    "method": "set_output_mode",
+                    "type": "enum",
+                    "options": [OUTPUT_MODE_EDGE, OUTPUT_MODE_POINT, OUTPUT_MODE_PRIM],
+                    "default": OUTPUT_MODE_EDGE,
+                },
+            ]
+        }
+
     def hud_template(self):
         return [
             {"id": "loop_mode", "label": "Loop Mode"},
