@@ -247,6 +247,23 @@ class HoverDrawFeature(ViewerFeature):
             return True
         return False
 
+    def hud_template(self):
+        return [
+            {"id": "tool_mode", "label": "Tool Mode"},
+            {"id": "tool_keys", "label": "Mode Keys"},
+            {"id": "draw_shortcuts", "label": "Draw Shortcuts"},
+        ]
+
+    def hud_values(self, ctx=None):
+        mode = "-"
+        if ctx is not None:
+            mode = str(getattr(ctx, "tool_mode", "") or "-").upper()
+        return {
+            "tool_mode": mode,
+            "tool_keys": "D: Draw | M: Move",
+            "draw_shortcuts": "LMB: add | Drag: move last",
+        }
+
     def _resolve_hit_position(self, ctx, ui_event, hover):
         try:
             rpos, rdir = ui_event.ray()
