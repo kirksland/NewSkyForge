@@ -2,7 +2,6 @@ import hou
 import resourceutils as ru
 
 from ..feature_base import ViewerFeature
-from ..preview_service import PreviewService
 from .. import constants as k
 
 
@@ -15,6 +14,7 @@ class PreviewFeature(ViewerFeature):
     """
 
     name = "preview"
+    requires = ("preview",)
 
     def __init__(self, prefix="preview", enable_hover=False):
         self.prefix = prefix
@@ -31,8 +31,7 @@ class PreviewFeature(ViewerFeature):
         """Create/reuse preview service and initialize optional hover channels."""
         self.preview = ctx.get_service("preview")
         if self.preview is None:
-            self.preview = PreviewService(ctx.scene_viewer, prefix=self.prefix)
-            ctx.set_service("preview", self.preview)
+            return
 
         if self.enable_hover:
             self.color_options = ru.ColorOptions(ctx.scene_viewer)
@@ -55,12 +54,14 @@ class PreviewFeature(ViewerFeature):
 
         hit = ctx.get_service("hit")
         if not hit:
+            hit = ctx.get_service("hover")
+        if not hit:
             self._hide_hover_channels()
             return False
 
-        mode = getattr(ctx, "select_mode", "EDGE")
+        mode = getattr(ctx, "select_mode", k.SELECT_EDGE)
 
-        if mode == "POINT":
+        if mode == k.SELECT_POINT:
             self.preview.hide(self.ch_edge)
             self.preview.hide(self.ch_face)
             self._set_rest_points(ctx)
@@ -72,7 +73,7 @@ class PreviewFeature(ViewerFeature):
                 self.preview.hide(self.ch_point_hover)
             return False
 
-        if mode == "EDGE":
+        if mode == k.SELECT_EDGE:
             self.preview.hide(self.ch_point_rest)
             self.preview.hide(self.ch_point_hover)
             self.preview.hide(self.ch_face)

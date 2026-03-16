@@ -2,7 +2,6 @@ import hou
 import curveutils as cu
 
 from ..feature_base import ViewerFeature
-from ..preview_service import PreviewService
 from .. import constants as k
 
 
@@ -14,8 +13,9 @@ class HoverDrawFeature(ViewerFeature):
     """
 
     name = "hover_draw"
+    requires = ("hover", "preview", "edit_geo", "tool_mode")
 
-    def __init__(self):
+    def __init__(self, auto_tool_mode=True):
         self.preview = None
         self.point_ids = []
         self.picker = cu.curve3DPicker(cu.curve3DPicker.MODE_VIEWPLANE)
@@ -23,14 +23,21 @@ class HoverDrawFeature(ViewerFeature):
         self.ch_line = k.CH_CURVE_LINE
         self.drag_active = False
         self._last_ptnum = -1
+        self.auto_tool_mode = bool(auto_tool_mode)
+        self._ctx = None
 
     def on_enter(self, ctx, kwargs):
+        self._ctx = ctx
         self.picker.reset()
         self.picker.setPickMode(cu.curve3DPicker.MODE_VIEWPLANE)
         self.preview = ctx.get_service("preview")
         if self.preview is None:
-            self.preview = PreviewService(ctx.scene_viewer, prefix="hover_draw")
-            ctx.set_service("preview", self.preview)
+            return
+        if self.auto_tool_mode:
+            try:
+                ctx.tool_mode = k.TOOL_DRAW
+            except Exception:
+                pass
 
         self.preview.ensure_point_channel(
             self.ch_points,
@@ -50,9 +57,10 @@ class HoverDrawFeature(ViewerFeature):
         self.drag_active = False
         self._last_ptnum = -1
         self._hide(ctx)
+        self._ctx = None
 
     def on_mouse_event(self, ctx, kwargs):
-        if str(getattr(ctx, "tool_mode", "")).upper() != k.TOOL_MODE_DRAW:
+        if str(getattr(ctx, "tool_mode", "")).upper() != k.TOOL_DRAW:
             self.drag_active = False
             self._last_ptnum = -1
             return False
@@ -188,6 +196,56 @@ class HoverDrawFeature(ViewerFeature):
             ctx.scene_viewer.curViewport().draw()
         except Exception:
             pass
+
+    @staticmethod
+    def build_hotkeys(definitions, state_typename):
+        key_context = "h.pane.gview.state.sop.{0}".format(state_typename)
+        key_category = "h.pane.gview.state.sop.{0}".format(state_typename)
+        if not definitions.containsContext(key_context):
+            definitions.addContext(
+                key_context,
+                "{0} Operation".format(state_typename),
+                "Keys for {0} viewer state.".format(state_typename),
+            )
+        if not definitions.containsCommandCategory(key_category):
+            definitions.addCommandCategory(
+                key_category,
+                "{0} Operation".format(state_typename),
+                "Commands for {0} viewer state.".format(state_typename),
+            )
+
+        def _cmd(name, label, desc, default_keys):
+            symbol = key_category + "." + name
+            if not definitions.containsCommand(symbol):
+                definitions.addCommand(symbol, label, desc)
+            if default_keys:
+                definitions.addDefaultBinding(key_context, symbol, default_keys)
+            return symbol
+
+        return {
+            "tool_draw": _cmd("tool_draw", "Tool: Draw", "Switch tool mode to draw.", "D"),
+            "tool_move": _cmd("tool_move", "Tool: Move", "Switch tool mode to move.", "M"),
+        }
+
+    @staticmethod
+    def extend_menu(menu, hotkeys=None, add_separator=True):
+        if add_separator:
+            menu.addSeparator()
+        menu.addActionItem("tool_draw", "Tool: Draw", hotkeys.get("tool_draw") if hotkeys else None)
+        menu.addActionItem("tool_move", "Tool: Move", hotkeys.get("tool_move") if hotkeys else None)
+        return menu
+
+    def handle_menu_action(self, kwargs):
+        action = kwargs.get("menu_item")
+        if action == "tool_draw":
+            if self._ctx is not None:
+                self._ctx.tool_mode = k.TOOL_DRAW
+            return True
+        if action == "tool_move":
+            if self._ctx is not None:
+                self._ctx.tool_mode = k.TOOL_MOVE
+            return True
+        return False
 
     def _resolve_hit_position(self, ctx, ui_event, hover):
         try:

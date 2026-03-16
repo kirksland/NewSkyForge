@@ -1,6 +1,7 @@
 import hou
 
 from ..feature_base import ViewerFeature
+from .. import constants as k
 
 
 class HoverGadgetFeature(ViewerFeature):
@@ -32,6 +33,8 @@ class HoverGadgetFeature(ViewerFeature):
         point_hover_gadget="point_hover_gadget",
         enable_ray_filter=True,
         write_ctx_hover=True,
+        use_edit_geo=False,
+        sync_select_mode=True,
     ):
         """Initialize gadget names and runtime hover state."""
         self.line_gadget_name = str(line_gadget)
@@ -40,6 +43,9 @@ class HoverGadgetFeature(ViewerFeature):
         self.point_hover_gadget_name = str(point_hover_gadget)
         self.enable_ray_filter = bool(enable_ray_filter)
         self.write_ctx_hover = bool(write_ctx_hover)
+        self.use_edit_geo = bool(use_edit_geo)
+        self.sync_select_mode = bool(sync_select_mode)
+        self._ctx = None
 
         self.host = None
         self.scene_viewer = None
@@ -208,6 +214,7 @@ class HoverGadgetFeature(ViewerFeature):
         if mode_txt in self.MODE_ORDER and mode_txt in self.allowed_modes:
             self.mode = mode_txt
         self._apply_mode_visibility()
+        self._sync_select_mode()
 
     def set_allowed_modes(self, modes):
         """Limit which hover modes can be selected."""
@@ -222,11 +229,13 @@ class HoverGadgetFeature(ViewerFeature):
         if self.mode not in self.allowed_modes:
             self.mode = self._next_allowed(self.MODE_LINE)
         self._apply_mode_visibility()
+        self._sync_select_mode()
 
     def cycle_mode(self):
         """Cycle to the next allowed hover mode."""
         self.mode = self._next_allowed(self.mode)
         self._apply_mode_visibility()
+        self._sync_select_mode()
         return self.mode
 
     def handle_menu_action(self, kwargs):
@@ -289,6 +298,18 @@ class HoverGadgetFeature(ViewerFeature):
                     "type": "multi_enum",
                     "options": list(HoverGadgetFeature.MODE_ORDER),
                     "default": list(HoverGadgetFeature.MODE_ORDER),
+                },
+                {
+                    "label": "Use Edit Geo",
+                    "method": "set_use_edit_geo",
+                    "type": "bool",
+                    "default": False,
+                },
+                {
+                    "label": "Sync Select Mode",
+                    "method": "set_sync_select_mode",
+                    "type": "bool",
+                    "default": True,
                 },
             ]
         }
@@ -367,11 +388,23 @@ class HoverGadgetFeature(ViewerFeature):
     # ------------------------------------------------------------------
     def on_enter(self, ctx, kwargs):
         """Bind gadgets, resolve geometry, setup params, and apply mode visibility."""
+        self._ctx = ctx
         self.scene_viewer = getattr(ctx, "scene_viewer", self.scene_viewer)
+        if self.host is None and ctx is not None and hasattr(ctx, "get_service"):
+            host = ctx.get_service("host")
+            if host is not None:
+                self.bind_host(host)
         self._ensure_drawables()
 
+        if self.use_edit_geo and ctx is not None:
+            try:
+                if getattr(ctx, "edit_geo", None) is None:
+                    ctx.ensure_edit_geo()
+            except Exception:
+                pass
+
         if self.geometry is None:
-            geo = getattr(ctx, "edit_geo", None)
+            geo = getattr(ctx, "edit_geo", None) if self.use_edit_geo else None
             if geo is None:
                 geo = getattr(ctx, "geometry", None)
             if geo is None:
@@ -451,12 +484,43 @@ class HoverGadgetFeature(ViewerFeature):
 
     def on_draw(self, ctx, kwargs):
         """Draw active gadgets and optional edge hover guide."""
+        if self.use_edit_geo and ctx is not None:
+            geo = getattr(ctx, "edit_geo", None)
+            if geo is not None and geo is not self.geometry:
+                self.set_geometry(geo)
         dh = kwargs["draw_handle"]
         self._draw_active_gadgets(dh)
         if self.hover_edge_drawable is None:
             return
         self._sync_edge_drawable()
         self.hover_edge_drawable.draw(dh)
+
+    def set_use_edit_geo(self, enabled):
+        self.use_edit_geo = bool(enabled)
+
+    def set_sync_select_mode(self, enabled):
+        self.sync_select_mode = bool(enabled)
+
+    def _sync_select_mode(self):
+        if not self.sync_select_mode:
+            return
+        ctx = self._ctx
+        if ctx is None:
+            return
+        if self.mode == self.MODE_LINE:
+            ctx.select_mode = k.SELECT_EDGE
+            return
+        if self.mode == self.MODE_POINT:
+            ctx.select_mode = k.SELECT_POINT
+            return
+        if self.mode == self.MODE_FACE:
+            ctx.select_mode = k.SELECT_FACE
+            return
+        if self.mode == self.MODE_FACE_POINT:
+            cur = getattr(ctx, "select_mode", None)
+            if cur in (k.SELECT_POINT, k.SELECT_FACE):
+                return
+            ctx.select_mode = k.SELECT_FACE
 
     # ------------------------------------------------------------------
     # Internals
@@ -631,6 +695,8 @@ class HoverGadgetFeature(ViewerFeature):
             try:
                 if self.face_gadget is not None:
                     self.face_gadget.setParams({"indices": [int(c1)] if face_valid else []})
+                    # Avoid full-geo highlight when no valid face is hovered.
+                    self.face_gadget.show(bool(face_valid))
             except Exception:
                 pass
             try:

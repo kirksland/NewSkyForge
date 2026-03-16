@@ -17,6 +17,7 @@ class HoverMoveFeature(ViewerFeature):
     """
 
     name = "hover_move"
+    requires = ("hover", "edit_geo", "tool_mode")
 
     def __init__(self):
         self.debug = False
@@ -31,6 +32,10 @@ class HoverMoveFeature(ViewerFeature):
         self.push_interval = 0.05  # seconds (50 ms)
 
     def on_enter(self, ctx, kwargs):
+        try:
+            ctx.ensure_edit_geo()
+        except Exception:
+            pass
         self.picker.reset()
         self.picker.setPickMode(cu.curve3DPicker.MODE_VIEWPLANE)
         self._end_drag(ctx, commit=False)
@@ -43,7 +48,7 @@ class HoverMoveFeature(ViewerFeature):
         if ui is None:
             return False
 
-        if str(getattr(ctx, "tool_mode", "")).upper() != k.AUTO_AXIS_TOOL_ORDER[0]:
+        if str(getattr(ctx, "tool_mode", "")).upper() != k.TOOL_MOVE:
             return False
 
         if ctx.edit_geo is None:

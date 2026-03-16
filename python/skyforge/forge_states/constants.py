@@ -36,9 +36,24 @@ POINT_RADIUS_MAX = 24.0
 POINT_HOVER_EXTRA = 2.0
 
 AUTO_AXIS_MODE_ORDER = ("LOCAL", "WORLD", "EDGE")
-AUTO_AXIS_SELECT_ORDER = ("POINT", "EDGE", "FACE")
-AUTO_AXIS_TOOL_ORDER = ("MOVE", "CUT")
-TOOL_MODE_DRAW = "DRAW"
+
+# ---------------------------------------------------------------------------
+# Unified selection + tool modes
+# ---------------------------------------------------------------------------
+SELECT_POINT = "POINT"
+SELECT_EDGE = "EDGE"
+SELECT_FACE = "FACE"
+SELECT_ORDER = (SELECT_POINT, SELECT_EDGE, SELECT_FACE)
+
+TOOL_MOVE = "MOVE"
+TOOL_CUT = "CUT"
+TOOL_DRAW = "DRAW"
+TOOL_ORDER = (TOOL_MOVE, TOOL_CUT, TOOL_DRAW)
+
+# Backward-compatible aliases
+AUTO_AXIS_SELECT_ORDER = SELECT_ORDER
+AUTO_AXIS_TOOL_ORDER = (TOOL_MOVE, TOOL_CUT)
+TOOL_MODE_DRAW = TOOL_DRAW
 
 # ---------------------------------------------------------------------------
 # Loop modes
@@ -52,6 +67,7 @@ LOOP_MODE_QUAD = "quad"
 OUTPUT_MODE_EDGE = "edge"
 OUTPUT_MODE_POINT = "point"
 OUTPUT_MODE_PRIM = "prim"
+OUTPUT_MODE_FACE = OUTPUT_MODE_PRIM
 OUTPUT_MODE_ORDER = (OUTPUT_MODE_EDGE, OUTPUT_MODE_POINT, OUTPUT_MODE_PRIM)
 
 # ---------------------------------------------------------------------------

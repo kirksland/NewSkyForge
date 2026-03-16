@@ -55,7 +55,7 @@ class State(BaseState):
 
     def onEnter(self, kwargs):
         node = kwargs.get("node")
-        self.ctx.set_node(node)
+        self.bind_context(self.ctx, kwargs, ensure_geo=False, ensure_mesh=False)
         self.ctx.geometry = node.geometry() if node is not None else None
         self.ctx.ensure_mesh(geo=self.ctx.geometry)
 

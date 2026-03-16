@@ -4,7 +4,6 @@ import time
 import hou
 
 from ..feature_base import ViewerFeature
-from ..preview_service import PreviewService
 from ..constants import (
     LINE_WIDTH,
     COLOR_PREVIEW_YELLOW,
@@ -24,7 +23,7 @@ class AstarTurnFeature(ViewerFeature):
     - `ch_committed`: committed path (payload output)
     """
     name = "astar_turn"
-    requires = ("hover",)
+    requires = ("hover", "preview")
 
     def __init__(self):
         """Initialize runtime state, output mode, and preview channel names."""
@@ -45,10 +44,6 @@ class AstarTurnFeature(ViewerFeature):
         self.hover_he = -1
         self.committed_hedges = []
         self.preview = ctx.get_service("preview")
-        if self.preview is None:
-            # Keep external injection support: only create service when absent.
-            self.preview = PreviewService(ctx.scene_viewer, prefix="astar_turn")
-            ctx.set_service("preview", self.preview)
         if self.preview is None:
             return
         self.preview.ensure_line_channel(

@@ -97,6 +97,8 @@ class FeatureHub:
     def hud_template(self):
         rows = []
         for f in self._iter_features():
+            if getattr(f, "hud_enabled", True) is False:
+                continue
             frag = self._call(f, "hud_template")
             if frag:
                 try:
@@ -108,6 +110,8 @@ class FeatureHub:
     def hud_values(self, ctx):
         values = {}
         for f in self._iter_features():
+            if getattr(f, "hud_enabled", True) is False:
+                continue
             frag = self._call(f, "hud_values", ctx)
             if frag:
                 try:

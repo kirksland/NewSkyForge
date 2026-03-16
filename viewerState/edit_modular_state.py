@@ -37,7 +37,7 @@ class State(BaseState):
         self.register_feature("hover_move", self.move_feature)
 
     def onEnter(self, kwargs):
-        self.ctx.set_node(kwargs["node"])
+        self.bind_context(self.ctx, kwargs, ensure_geo=False, ensure_mesh=False)
         geo = self.ctx.ensure_edit_geo()
         self.ctx.geometry = geo
         self.ctx.ensure_mesh(geo=geo)

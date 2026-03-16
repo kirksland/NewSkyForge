@@ -37,7 +37,7 @@ class State(BaseState):
             self.register_feature("preview", self.preview_feature)
 
     def onEnter(self, kwargs):
-        self.ctx.set_node(kwargs["node"])
+        self.bind_context(self.ctx, kwargs, ensure_geo=False, ensure_mesh=False)
         self.ctx.load_point_radius_from_node()
         geo = self.ctx.ensure_edit_geo(
             stash_node_name=self.STASH_NODE_NAME,

@@ -37,8 +37,8 @@ class ToolContext:
 
         # Auto-axis style state
         self.mode = k.AUTO_AXIS_MODE_ORDER[0]
-        self.select_mode = k.AUTO_AXIS_SELECT_ORDER[0]
-        self.tool_mode = k.AUTO_AXIS_TOOL_ORDER[0]
+        self.select_mode = k.SELECT_ORDER[0]
+        self.tool_mode = k.TOOL_ORDER[0]
         self.point_radius = k.POINT_RADIUS_DEFAULT
         self.point_radius_step = k.POINT_RADIUS_STEP
         self.point_radius_min = k.POINT_RADIUS_MIN

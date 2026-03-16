@@ -40,15 +40,9 @@ class State(BaseState):
         self.hub = FeatureHub([self.hover_feature, self.astar_feature, self.loop_feature])
 
     def onEnter(self, kwargs):
-        self.ctx.set_node(kwargs["node"])
-        self.ctx.ensure_geo()
-        self.ctx.ensure_mesh(geo=self.ctx.geometry)
-        self.hover_feature.bind_host(self)
-        self.hover_feature.set_geometry(self.ctx.geometry)
+        self.bind_context(self.ctx, kwargs, ensure_geo=True, ensure_mesh=True)
         self.hover_feature.set_mode(HoverGadgetFeature.MODE_LINE)
-        self.hub.enter(self.ctx, kwargs)
-        self.hub.apply_hud(self.scene_viewer, base_template=self.HUD_TEMPLATE)
-        self._update_hud()
+        self.enter_with_hud(self.hub, self.ctx, kwargs, base_template=self.HUD_TEMPLATE, update=True)
 
     def onExit(self, kwargs):
         self.hub.exit(self.ctx, kwargs)

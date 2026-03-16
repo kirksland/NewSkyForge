@@ -2,7 +2,6 @@ import re
 import hou
 
 from ..feature_base import ViewerFeature
-from ..preview_service import PreviewService
 from ..constants import (
     LINE_WIDTH,
     COLOR_PREVIEW_YELLOW,
@@ -26,7 +25,7 @@ class TransversalLoopFeature(ViewerFeature):
     - `ch_committed`: committed loop (payload output)
     """
     name = "transversal_loop"
-    requires = ("hover",)
+    requires = ("hover", "preview")
 
     def __init__(self):
         """Initialize runtime mode, output mode, and preview channel names."""
@@ -39,10 +38,6 @@ class TransversalLoopFeature(ViewerFeature):
     def on_enter(self, ctx, kwargs):
         """Initialize/reuse preview service and ensure loop channels exist."""
         self.preview = ctx.get_service("preview")
-        if self.preview is None:
-            # Keep external injection support: only create service when absent.
-            self.preview = PreviewService(ctx.scene_viewer, prefix="transversal_loop")
-            ctx.set_service("preview", self.preview)
         if self.preview is None:
             return
         self.preview.ensure_line_channel(
